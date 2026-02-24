@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="mb-4">
+    <div class="hero rounded-4 p-4 p-lg-5 text-white">
+        <h1 class="h3 mb-2">Welcome, {{ current_user.name if current_user.is_authenticated else 'Guest' }}</h1>
+        <p class="mb-4">Track your learning, complete curated playlists, and build your personalized roadmap.</p>
+        <div class="row g-3">
+            <div class="col-md-4">
+                <div class="metric-box">
+                    <div class="metric-label">Completed Courses</div>
+                    <div class="metric-value">{{ completed_courses }} / {{ total_courses }}</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="metric-box">
+                    <div class="metric-label">Overall Progress</div>
+                    <div class="metric-value">{{ overall_progress }}%</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="metric-box">
+                    <div class="metric-label">Latest Roadmap</div>
+                    <div class="metric-value">{{ latest_roadmap.target_career if latest_roadmap else 'Not generated' }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section>
+    <h2 class="h4 mb-3">Learning Categories</h2>
+    <div class="row g-4">
+        {% for item in category_progress %}
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm hover-lift">
+                <div class="card-body">
+                    <h3 class="h5">{{ item.category.name }}</h3>
+                    <p class="small text-muted">{{ item.total }} playlists available</p>
+                    <div class="progress mb-2" role="progressbar" aria-label="Category progress" aria-valuenow="{{ item.progress }}" aria-valuemin="0" aria-valuemax="100">
+                        <div class="progress-bar" style="width: {{ item.progress }}%">{{ item.progress }}%</div>
+                    </div>
+                    <p class="small mb-3">{{ item.completed }} completed</p>
+                    <a href="{{ url_for('courses', category_id=item.category.id) }}" class="btn btn-outline-primary btn-sm">View Courses</a>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

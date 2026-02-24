@@ -1,0 +1,76 @@
+:root {
+    --hub-primary: #1d4ed8;
+    --hub-secondary: #0f766e;
+    --hub-accent: #f59e0b;
+}
+
+body {
+    min-height: 100vh;
+    background: radial-gradient(circle at 10% 20%, #dbeafe 0%, #f8fafc 40%, #ecfeff 100%);
+}
+
+.hero-nav {
+    background: linear-gradient(120deg, var(--hub-primary), var(--hub-secondary));
+}
+
+.hero {
+    background: linear-gradient(130deg, rgba(29, 78, 216, 0.95), rgba(15, 118, 110, 0.92));
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
+}
+
+.glass-card {
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(8px);
+}
+
+.metric-box {
+    padding: 0.8rem 1rem;
+    border-radius: 0.8rem;
+    background: rgba(255, 255, 255, 0.18);
+}
+
+.metric-label {
+    font-size: 0.85rem;
+    opacity: 0.95;
+}
+
+.metric-value {
+    font-size: 1.25rem;
+    font-weight: 700;
+}
+
+.hover-lift {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hover-lift:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+}
+
+.progress {
+    height: 0.9rem;
+}
+
+.progress-bar {
+    background-color: var(--hub-secondary);
+}
+
+.timeline {
+    border-left: 3px solid #cbd5e1;
+    padding-left: 1rem;
+}
+
+.timeline-item {
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px dashed #cbd5e1;
+}
+
+.min-vh-75 {
+    min-height: 75vh;
+}
+
+[data-bs-theme="dark"] body {
+    background: radial-gradient(circle at 10% 20%, #0f172a 0%, #111827 45%, #1f2937 100%);
+}

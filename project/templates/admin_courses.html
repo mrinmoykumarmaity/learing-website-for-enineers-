@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h1 class="h4 mb-3">Admin: Add Course</h1>
+                <form method="post">
+                    <div class="mb-3">
+                        <label class="form-label">Title</label>
+                        <input class="form-control" name="title" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea class="form-control" name="description" rows="3" required></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Playlist URL</label>
+                        <input class="form-control" name="playlist_url" type="url" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Category</label>
+                        <select class="form-select" name="category_id" required>
+                            <option value="">Select category</option>
+                            {% for category in categories %}
+                            <option value="{{ category.id }}">{{ category.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button class="btn btn-primary w-100">Add Course</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm mt-4">
+            <div class="card-body">
+                <h2 class="h5 mb-3">Bulk Playlist Upload</h2>
+                <p class="small text-muted mb-2">One line per playlist: <code>Title | Description | Playlist URL | Category Name</code></p>
+                <form method="post">
+                    <div class="mb-3">
+                        <label class="form-label">Playlist Rows</label>
+                        <textarea class="form-control" name="bulk_courses" rows="8" placeholder="Python Basics | Learn Python from scratch | https://youtube.com/playlist?list=... | Software Engineering"></textarea>
+                    </div>
+                    <button class="btn btn-outline-primary w-100">Upload Playlists</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h2 class="h5 mb-3">Recently Added Courses</h2>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>Category</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for course in latest_courses %}
+                            <tr>
+                                <td>{{ course.title }}</td>
+                                <td>{{ course.category.name }}</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="2" class="text-muted">No courses available.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

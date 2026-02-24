@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row g-4">
+    <div class="col-lg-4">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h1 class="h4 mb-3">Generate Roadmap</h1>
+                <form method="post">
+                    <div class="mb-3">
+                        <label class="form-label">Current Level</label>
+                        <select name="current_level" class="form-select">
+                            <option>Beginner</option>
+                            <option>Intermediate</option>
+                            <option>Advanced</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Target Career</label>
+                        <select name="target_career" class="form-select">
+                            <option>AI Engineer</option>
+                            <option>Data Analyst</option>
+                            <option>Software Developer</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Daily Study Time (hours)</label>
+                        <input type="number" name="daily_study_time" class="form-control" min="1" max="10" value="2" required>
+                    </div>
+                    <button class="btn btn-primary w-100">Generate</button>
+                </form>
+            </div>
+        </div>
+        <div class="card border-0 shadow-sm mt-4">
+            <div class="card-body">
+                <h2 class="h5 mb-2">Software Roadmap PDF</h2>
+                <p class="small text-muted mb-3">Full Stack Web Development roadmap added by you.</p>
+                <a
+                    class="btn btn-outline-primary w-100"
+                    href="{{ url_for('static', filename='roadmaps/full-stack-web-development-roadmap.pdf') }}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    Open PDF Roadmap
+                </a>
+            </div>
+        </div>
+        <div class="card border-0 shadow-sm mt-4">
+            <div class="card-body">
+                <h2 class="h5 mb-2">Non-Coding Careers PDF</h2>
+                <p class="small text-muted mb-3">Career roadmap/resource for non-coding fields.</p>
+                <a
+                    class="btn btn-outline-secondary w-100"
+                    href="{{ url_for('static', filename='roadmaps/non-coding-careers.pdf') }}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    Open Non-Coding PDF
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-8">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body">
+                <h2 class="h5">Generated Roadmap</h2>
+                {% if generated %}
+                <div class="timeline">
+                    {% for month in generated %}
+                    <div class="timeline-item">
+                        <h3 class="h6">Month {{ month.month }} - {{ month.focus_topic }}</h3>
+                        <p class="mb-1"><strong>Weekly Hours:</strong> {{ month.weekly_hours }}</p>
+                        <p class="mb-1"><strong>Project:</strong> {{ month.project }}</p>
+                        <p class="mb-1"><strong>Courses:</strong> {{ month.recommended_courses | join(', ') }}</p>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-muted mb-0">No roadmap generated in this session yet.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h2 class="h5">Saved Roadmaps</h2>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Level</th>
+                                <th>Career</th>
+                                <th>Daily Hours</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in saved_roadmaps %}
+                            <tr>
+                                <td>{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>{{ item.current_level }}</td>
+                                <td>{{ item.target_career }}</td>
+                                <td>{{ item.daily_study_time }}</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="4" class="text-muted">No saved roadmaps yet.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
