@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="mb-4">
+    <div class="hero rounded-4 p-4 p-lg-5 text-white">
+        <h1 class="h3 mb-2">AI Learning Assistant</h1>
+        <p class="mb-0">Ask study questions, get roadmap advice, and receive concise learning guidance.</p>
+    </div>
+</section>
+
+<section>
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                <button type="button" id="startListeningBtn" class="btn btn-outline-primary btn-sm">Start Voice Input</button>
+                <button type="button" id="stopListeningBtn" class="btn btn-outline-secondary btn-sm" disabled>Stop Listening</button>
+                <button type="button" id="speakAnswerBtn" class="btn btn-outline-success btn-sm" {% if not answer %}disabled{% endif %}>Speak Answer</button>
+                <button type="button" id="stopSpeakingBtn" class="btn btn-outline-danger btn-sm">Stop Speaking</button>
+                <button type="button" id="copyAnswerBtn" class="btn btn-outline-info btn-sm" {% if not answer %}disabled{% endif %}>Copy Answer</button>
+                <span id="voiceStatus" class="small text-muted">Voice assistant idle.</span>
+            </div>
+
+            <form method="post" class="mb-3" id="aiQuestionForm">
+                <label for="question" class="form-label">Your question</label>
+                <textarea id="question" name="question" class="form-control" rows="4" placeholder="Example: Make a 2-month plan to become a backend Python developer." required>{{ question }}</textarea>
+                <div class="d-flex align-items-center gap-2 mt-3">
+                    <button type="submit" name="action" value="ask" id="askAiBtn" class="btn btn-primary">Get AI Answer</button>
+                    <button type="submit" name="action" value="regenerate" id="regenAiBtn" class="btn btn-outline-primary" {% if not question %}disabled{% endif %}>Regenerate Answer</button>
+                    <span id="aiWaitHint" class="small text-muted d-none">Getting answer...</span>
+                </div>
+            </form>
+
+            {% if answer %}
+            <hr>
+            <h2 class="h5">AI Answer</h2>
+            <pre id="aiAnswerText" class="p-3 bg-body-tertiary border rounded-3 mb-0" style="white-space: pre-wrap;">{{ answer }}</pre>
+            {% endif %}
+        </div>
+    </div>
+</section>
+
+<script>
+(() => {
+    const questionInput = document.getElementById('question');
+    const answerText = document.getElementById('aiAnswerText');
+    const startBtn = document.getElementById('startListeningBtn');
+    const stopBtn = document.getElementById('stopListeningBtn');
+    const speakBtn = document.getElementById('speakAnswerBtn');
+    const stopSpeakBtn = document.getElementById('stopSpeakingBtn');
+    const copyAnswerBtn = document.getElementById('copyAnswerBtn');
+    const statusEl = document.getElementById('voiceStatus');
+    const askForm = document.getElementById('aiQuestionForm');
+    const askBtn = document.getElementById('askAiBtn');
+    const regenBtn = document.getElementById('regenAiBtn');
+    const waitHint = document.getElementById('aiWaitHint');
+
+    function setStatus(text) {
+        if (statusEl) {
+            statusEl.textContent = text;
+        }
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+    let finalTranscript = '';
+    let wantsListening = false;
+    let isListening = false;
+    let micPermissionChecked = false;
+    let restartTimer = null;
+    let restartDelayMs = 250;
+
+    function updateListeningButtons(isListening) {
+        if (startBtn) {
+            startBtn.disabled = isListening;
+        }
+        if (stopBtn) {
+            stopBtn.disabled = !isListening;
+        }
+    }
+
+    function clearRestartTimer() {
+        if (restartTimer) {
+            window.clearTimeout(restartTimer);
+            restartTimer = null;
+        }
+    }
+
+    function stopListeningUi() {
+        isListening = false;
+        updateListeningButtons(false);
+    }
+
+    function safeStartRecognition() {
+        if (!recognition || isListening || !wantsListening) {
+            return;
+        }
+        try {
+            recognition.start();
+        } catch (err) {
+            if (err && err.name === 'InvalidStateError') {
+                return;
+            }
+            wantsListening = false;
+            stopListeningUi();
+            setStatus('Unable to start microphone input.');
+        }
+    }
+
+    function scheduleRestart() {
+        if (!wantsListening) {
+            return;
+        }
+        clearRestartTimer();
+        restartTimer = window.setTimeout(() => {
+            safeStartRecognition();
+            restartDelayMs = Math.min(restartDelayMs + 150, 1200);
+        }, restartDelayMs);
+    }
+
+    async function ensureMicPermission() {
+        if (micPermissionChecked) {
+            return true;
+        }
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            // Some browsers allow SpeechRecognition without this API.
+            micPermissionChecked = true;
+            return true;
+        }
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach((track) => track.stop());
+            micPermissionChecked = true;
+            return true;
+        } catch (err) {
+            setStatus('Microphone permission is required for voice input.');
+            return false;
+        }
+    }
+
+    if (!SpeechRecognition) {
+        setStatus('Voice input is not supported in this browser.');
+        updateListeningButtons(false);
+        if (startBtn) {
+            startBtn.disabled = true;
+        }
+    } else {
+        recognition = new SpeechRecognition();
+        recognition.lang = 'en-US';
+        recognition.interimResults = true;
+        recognition.continuous = true;
+
+        recognition.onstart = () => {
+            isListening = true;
+            restartDelayMs = 250;
+            setStatus('Listening... Speak now.');
+            updateListeningButtons(true);
+        };
+
+        recognition.onresult = (event) => {
+            let interim = '';
+            for (let i = event.resultIndex; i < event.results.length; i += 1) {
+                const transcript = event.results[i][0].transcript;
+                if (event.results[i].isFinal) {
+                    finalTranscript += `${transcript} `;
+                } else {
+                    interim += transcript;
+                }
+            }
+            if (questionInput) {
+                questionInput.value = `${finalTranscript}${interim}`.trim();
+            }
+        };
+
+        recognition.onerror = (event) => {
+            setStatus(`Voice input error: ${event.error}`);
+            if (event.error === 'not-allowed' || event.error === 'service-not-allowed' || event.error === 'audio-capture') {
+                wantsListening = false;
+                clearRestartTimer();
+                stopListeningUi();
+            }
+        };
+
+        recognition.onend = () => {
+            isListening = false;
+            clearRestartTimer();
+            if (wantsListening) {
+                setStatus('Reconnecting microphone...');
+                scheduleRestart();
+                return;
+            }
+            setStatus('Voice input stopped.');
+            stopListeningUi();
+        };
+
+        if (startBtn) {
+            startBtn.addEventListener('click', async () => {
+                finalTranscript = questionInput ? `${questionInput.value} ` : '';
+                wantsListening = true;
+                clearRestartTimer();
+                const permissionOk = await ensureMicPermission();
+                if (!permissionOk) {
+                    wantsListening = false;
+                    stopListeningUi();
+                    return;
+                }
+                safeStartRecognition();
+            });
+        }
+
+        if (stopBtn) {
+            stopBtn.addEventListener('click', () => {
+                wantsListening = false;
+                clearRestartTimer();
+                if (recognition && isListening) {
+                    recognition.stop();
+                } else {
+                    stopListeningUi();
+                    setStatus('Voice input stopped.');
+                }
+            });
+        }
+    }
+
+    function speakText(text) {
+        if (!('speechSynthesis' in window)) {
+            setStatus('Voice output is not supported in this browser.');
+            return;
+        }
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'en-US';
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        utterance.onstart = () => setStatus('Speaking AI answer...');
+        utterance.onend = () => setStatus('Finished speaking.');
+        utterance.onerror = () => setStatus('Voice output failed.');
+        window.speechSynthesis.speak(utterance);
+    }
+
+    if (speakBtn) {
+        speakBtn.addEventListener('click', () => {
+            if (!answerText || !answerText.textContent.trim()) {
+                setStatus('No AI answer available to speak.');
+                return;
+            }
+            speakText(answerText.textContent.trim());
+        });
+    }
+
+    if (stopSpeakBtn) {
+        stopSpeakBtn.addEventListener('click', () => {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                setStatus('Stopped speaking.');
+            }
+        });
+    }
+
+    if (copyAnswerBtn) {
+        copyAnswerBtn.addEventListener('click', async () => {
+            const answerValue = answerText ? answerText.textContent.trim() : '';
+            if (!answerValue) {
+                setStatus('No AI answer available to copy.');
+                return;
+            }
+            if (!navigator.clipboard || !navigator.clipboard.writeText) {
+                setStatus('Clipboard is not supported in this browser.');
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(answerValue);
+                setStatus('AI answer copied.');
+            } catch (_err) {
+                setStatus('Could not copy answer.');
+            }
+        });
+    }
+
+    if (askForm && askBtn) {
+        askForm.addEventListener('submit', (event) => {
+            const clickedBtn = event.submitter;
+            askBtn.disabled = true;
+            if (regenBtn) {
+                regenBtn.disabled = true;
+            }
+            if (clickedBtn) {
+                clickedBtn.textContent = 'Thinking...';
+            } else {
+                askBtn.textContent = 'Thinking...';
+            }
+            if (waitHint) {
+                waitHint.classList.remove('d-none');
+            }
+        });
+    }
+})();
+</script>
+{% endblock %}

@@ -9,3 +9,6 @@ env/
 instance/*.db
 project/instance/*.db
 *.sqlite3
+*.db
+
+.vercel

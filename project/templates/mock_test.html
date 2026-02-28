@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="mb-4">
+    <div class="hero rounded-4 p-4 p-lg-5 text-white">
+        <h1 class="h3 mb-2">AI Interviewer Mock Test</h1>
+        {% if is_guest_mode %}
+        <p class="mb-0">Guest mode is enabled. Choose any subject and start your AI-led interview test.</p>
+        {% else %}
+        <p class="mb-0">Choose any subject and take an AI-generated mock test. Your score will be saved.</p>
+        {% endif %}
+    </div>
+</section>
+
+<section class="mb-4">
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <h2 class="h5 mb-3">Generate Mock Test</h2>
+            <form method="post" class="row g-3 align-items-end">
+                <input type="hidden" name="action" value="generate">
+                <div class="col-md-6">
+                    <label class="form-label">Subject</label>
+                    <select name="subject" class="form-select">
+                        {% for subject in available_subjects %}
+                        <option value="{{ subject }}" {% if subject == selected_subject %}selected{% endif %}>{{ subject }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Questions</label>
+                    <select name="question_count" class="form-select">
+                        {% for count in question_count_options %}
+                        <option value="{{ count }}" {% if count == selected_question_count %}selected{% endif %}>{{ count }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <button type="submit" class="btn btn-primary w-100">Generate by AI</button>
+                </div>
+            </form>
+            {% if questions %}
+            <p class="small text-muted mt-3 mb-0">
+                Current test: <strong>{{ selected_subject }}</strong> | {{ total_questions }} questions |
+                {% if ai_generated %}AI generated{% else %}Fallback generated{% endif %}
+            </p>
+            {% endif %}
+        </div>
+    </div>
+</section>
+
+{% if latest_attempt %}
+<section class="mb-4">
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <h2 class="h6 mb-2">Latest Saved Attempt</h2>
+            <p class="mb-0 text-muted">
+                {{ latest_attempt.created_at.strftime('%Y-%m-%d %H:%M') }}:
+                {{ latest_attempt.score_percent }}% ({{ latest_attempt.correct_answers }}/{{ latest_attempt.total_questions }})
+            </p>
+        </div>
+    </div>
+</section>
+{% endif %}
+
+{% if score is not none %}
+<section class="mb-4">
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <h2 class="h5 mb-2">Interview Result</h2>
+            <p class="mb-1"><strong>Score:</strong> {{ score }}%</p>
+            <p class="mb-1"><strong>Correct Answers:</strong> {{ correct_answers }} / {{ total_questions }}</p>
+            <p class="mb-2">
+                <strong>Status:</strong>
+                {% if passed %}
+                <span class="text-success">Passed</span>
+                {% else %}
+                <span class="text-danger">Needs Improvement</span>
+                {% endif %}
+            </p>
+            {% if interviewer_feedback %}
+            <h3 class="h6 mt-3">AI Interviewer Feedback</h3>
+            <pre class="p-3 bg-body-tertiary border rounded-3 mb-0" style="white-space: pre-wrap;">{{ interviewer_feedback }}</pre>
+            {% endif %}
+        </div>
+    </div>
+</section>
+{% endif %}
+
+<section>
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <h2 class="h5 mb-3">Interview Questions</h2>
+            {% if questions %}
+            <form method="post">
+                <input type="hidden" name="action" value="submit">
+                <input type="hidden" name="payload_token" value="{{ payload_token }}">
+                {% for item in questions %}
+                <div class="mb-4">
+                    <p class="fw-semibold mb-2">{{ loop.index }}. {{ item.question }}</p>
+                    {% for option in item.options %}
+                    <div class="form-check mb-1">
+                        <input class="form-check-input" type="radio" name="{{ item.id }}" id="{{ item.id }}_{{ loop.index }}" value="{{ loop.index0 }}" required>
+                        <label class="form-check-label" for="{{ item.id }}_{{ loop.index }}">{{ option }}</label>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+                <button type="submit" class="btn btn-primary">Submit Mock Test</button>
+            </form>
+            {% else %}
+            <p class="text-muted mb-0">Generate a test first, then answer the interview questions here.</p>
+            {% endif %}
+        </div>
+    </div>
+</section>
+{% endblock %}

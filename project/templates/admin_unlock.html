@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="row justify-content-center">
+    <div class="col-md-7 col-lg-5">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h1 class="h4 mb-3">Admin Unlock</h1>
+                {% if admin_token_configured %}
+                <p class="text-muted small">Enter the admin access token to unlock protected routes for this browser session.</p>
+                <form method="post">
+                    <input type="hidden" name="next" value="{{ next_url }}">
+                    <div class="mb-3">
+                        <label for="admin_token" class="form-label">Admin Token</label>
+                        <input id="admin_token" class="form-control" name="admin_token" type="password" minlength="6" maxlength="200" required>
+                    </div>
+                    <button class="btn btn-primary w-100">Unlock Admin Access</button>
+                </form>
+                {% else %}
+                <div class="alert alert-warning mb-0" role="alert">
+                    ADMIN_ACCESS_TOKEN is not configured on the server. Set it first, then retry.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}
