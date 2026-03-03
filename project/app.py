@@ -6,9 +6,9 @@ import tempfile
 import time
 from datetime import datetime, timedelta
 from functools import wraps
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
-from flask import Flask, flash, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, redirect, render_template, request, send_from_directory, session, url_for
 from flask_login import LoginManager, current_user, login_required, logout_user
 from sqlalchemy import func, text
 from openai import OpenAI
@@ -67,6 +67,159 @@ ADMIN_SESSION_TTL_SECONDS_DEFAULT = 4 * 60 * 60
 VALID_RESOURCE_TYPES = ("Video", "PDF", "Practice")
 RESOURCE_FILTER_OPTIONS = ("All", "Video", "PDF", "Practice")
 ALLOWED_RESOURCE_EXTENSIONS = {".pdf"}
+PROJECT_IDEA_LEVEL_OPTIONS = ("Beginner", "Intermediate", "Advanced")
+RESUME_FIELD_LIMITS = {
+    "full_name": 120,
+    "target_role": 120,
+    "email": 140,
+    "phone": 40,
+    "location": 120,
+    "linkedin_url": 220,
+    "github_url": 220,
+    "summary": 600,
+    "skills_text": 800,
+    "projects_text": 1800,
+    "experience_text": 1800,
+    "education_text": 1200,
+    "certifications_text": 900,
+}
+INTERVIEW_QUESTION_GROUPS = [
+    {
+        "level": "Beginner",
+        "questions": [
+            {
+                "question": "What is Object-Oriented Programming (OOP)?",
+                "answer": "OOP is a programming paradigm based on objects and classes. It's a way to structure code to make it more modular, reusable, and maintainable. In OOP, data (attributes) and behavior (methods) are bundled together into objects. This approach mirrors real-world entities where objects have properties and perform actions.",
+            },
+            {
+                "question": "What are the four pillars of OOP?",
+                "answer": "The four pillars of OOP are: 1) Encapsulation - bundling data and methods together and hiding internal details, 2) Abstraction - hiding complex implementation details and showing only necessary features, 3) Inheritance - allowing classes to inherit properties and methods from parent classes, 4) Polymorphism - allowing objects to take multiple forms and methods to have the same name with different implementations.",
+            },
+            {
+                "question": "What is a class vs an object?",
+                "answer": "A class is a blueprint or template that defines the structure and behavior of objects. An object is an instance of a class - a concrete realization of the class. For example, 'Car' is a class (blueprint) while 'my car' is an object (specific instance). You can create multiple objects from a single class.",
+            },
+            {
+                "question": "What is encapsulation?",
+                "answer": "Encapsulation is the bundling of data (attributes) and methods (functions) into a single unit called a class, while hiding the internal details from the outside world. It uses access modifiers (public, private, protected) to control visibility. Benefits include data protection, flexibility to change internal implementation, and reduced complexity.",
+            },
+            {
+                "question": "What is abstraction?",
+                "answer": "Abstraction is the concept of hiding complex implementation details and showing only the necessary features of an object. It reduces complexity by letting programmers work with objects at a higher level without worrying about internal implementation. For example, you use a car without knowing its internal engine mechanics.",
+            },
+            {
+                "question": "What is inheritance?",
+                "answer": "Inheritance is a mechanism where a new class (child/derived class) inherits properties and methods from an existing class (parent/base class). It promotes code reuse and establishes a hierarchical relationship. For example, 'Dog' and 'Cat' can inherit from 'Animal'. Child classes can override parent methods or add new functionality.",
+            },
+            {
+                "question": "What is polymorphism?",
+                "answer": "Polymorphism means 'many forms'. It allows objects to take multiple forms and functions to have the same name with different implementations. Two main types: 1) Method overloading (same method name, different parameters), 2) Method overriding (child class redefines parent's method). Polymorphism enables flexible and reusable code.",
+            },
+            {
+                "question": "Method overloading vs overriding?",
+                "answer": "Method overloading occurs in the same class where multiple methods have the same name but different parameters (number, type, or order). Method overriding occurs when a derived class redefines a method from the parent class with the same signature. Overloading is compile-time (static) polymorphism, while overriding is runtime (dynamic) polymorphism.",
+            },
+            {
+                "question": "What are access modifiers?",
+                "answer": "Access modifiers control the visibility of class members (variables and methods). Common types: 1) Public - accessible from anywhere, 2) Private - accessible only within the class, 3) Protected - accessible within the class and derived classes, 4) Default/Package - accessible within the same package. They enforce encapsulation and data protection.",
+            },
+            {
+                "question": "What is a constructor?",
+                "answer": "A constructor is a special method that initializes an object when it's created. It has the same name as the class and no return type. Constructors are called automatically when using the 'new' keyword. They can be parameterized (accepting arguments) or parameterless. Default constructors are provided if none is defined. Constructors help set up initial object state.",
+            },
+        ],
+    },
+    {
+        "level": "Intermediate",
+        "questions": [
+            {
+                "question": "What is dynamic (runtime) polymorphism?",
+                "answer": "Dynamic polymorphism is when the method to be called is determined at runtime rather than compile time. It's achieved through method overriding in inheritance hierarchies. When a parent class reference points to a child class object, calling a virtual method executes the child's version. This allows flexible code where specific behavior depends on actual object type.",
+            },
+            {
+                "question": "Interface vs abstract class?",
+                "answer": "Interfaces define contracts (what must be implemented) but provide no implementation. Abstract classes can have both abstract methods (no implementation) and concrete methods. Classes can implement multiple interfaces but inherit from only one class. Use interfaces for unrelated classes providing the same capability; use abstract classes for related classes sharing common code and state.",
+            },
+            {
+                "question": "Composition over inheritance - why?",
+                "answer": "Composition (has-a relationship) is often preferred over inheritance (is-a relationship) because it's more flexible and avoids tight coupling. With composition, you build objects by combining smaller objects rather than creating deep inheritance hierarchies. It reduces fragility - changes to parent classes don't affect child classes. It also avoids the diamond problem and makes testing easier.",
+            },
+            {
+                "question": "What is coupling and cohesion?",
+                "answer": "Coupling measures how dependent classes are on each other - low coupling is preferred. High coupling makes code hard to modify and test. Cohesion measures how closely related methods and data are within a class - high cohesion is preferred. A class with high cohesion has methods that work together toward a single purpose. Good design aims for low coupling and high cohesion.",
+            },
+            {
+                "question": "What is SOLID?",
+                "answer": "SOLID is an acronym for five design principles: Single Responsibility (class has one reason to change), Open-Closed (open for extension, closed for modification), Liskov Substitution (child classes must be substitutable for parent), Interface Segregation (clients shouldn't depend on unused methods), Dependency Inversion (depend on abstractions, not concretions). These principles create maintainable, flexible code.",
+            },
+            {
+                "question": "Explain Liskov Substitution Principle.",
+                "answer": "LSP states that objects of a derived class must be substitutable for objects of the base class without breaking the application. Child class objects should work wherever parent class objects are expected. Example: if Bird is parent and Penguin is child, we shouldn't restrict Penguin's functionality (like flying). Violations occur when derived classes are incompatible with base class contracts.",
+            },
+            {
+                "question": "What is Dependency Injection?",
+                "answer": "Dependency Injection (DI) is a design pattern where an object's dependencies are provided externally rather than created internally. Instead of a class creating the objects it needs, those objects are injected through constructors, methods, or properties. Benefits include loose coupling, easier testing (inject mock objects), and improved flexibility. It's a key aspect of the Dependency Inversion Principle.",
+            },
+            {
+                "question": "Aggregation vs composition?",
+                "answer": "Both represent 'has-a' relationships. Aggregation is a weak relationship where the child can exist independently of the parent (e.g., Department has Employees - employees exist without department). Composition is a strong relationship where the child cannot exist without the parent (e.g., House has Rooms - rooms don't exist without house). In composition, deleting parent deletes children; in aggregation, they can exist separately.",
+            },
+            {
+                "question": "Shallow copy vs deep copy?",
+                "answer": "Shallow copy copies an object's reference fields, not the objects they point to. Changes to referenced objects affect both original and copy. Deep copy recursively copies all objects and nested structures, creating independent copies. Shallow copies are faster but risky with mutable objects. Deep copies are slower but ensure true independence. Choice depends on whether objects share data or are independent.",
+            },
+            {
+                "question": "Static vs final methods - why use them?",
+                "answer": "Static methods belong to the class, not instances - called on the class itself. They can't access instance variables. Use for utility functions. Final methods can't be overridden by subclasses - prevents modification of critical behavior. Use when you want to ensure a method's implementation remains unchanged. Final classes can't be subclassed. These provide control and prevent unintended modifications.",
+            },
+        ],
+    },
+    {
+        "level": "Advanced",
+        "questions": [
+            {
+                "question": "Multiple inheritance problem and solutions?",
+                "answer": "The diamond problem occurs when a class inherits from two classes that share a common parent, creating ambiguity about which parent's methods to use. C++ solves this with virtual inheritance. Java avoids multiple inheritance, using single inheritance + interfaces instead. Solutions include: explicitly specifying which parent's method to call, using composition instead, or using interfaces (which define contracts without implementation ambiguity).",
+            },
+            {
+                "question": "Common OOP design patterns?",
+                "answer": "Common patterns include: Singleton (single instance), Factory (create objects without specifying exact classes), Observer (notify multiple objects of state changes), Strategy (encapsulate interchangeable algorithms), Decorator (add behavior dynamically), Adapter (make incompatible interfaces compatible), Template Method (define algorithm skeleton in base, let derived classes override steps), Builder (construct complex objects step by step).",
+            },
+            {
+                "question": "Constructor vs destructor/finalizer?",
+                "answer": "Constructors initialize objects when created, allocating resources and setting initial state. Destructors/finalizers clean up resources when objects are destroyed. In languages with garbage collection (Java, Python), finalizers are unreliable - use try-finally or try-with-resources instead. In C++, destructors are critical. Proper cleanup prevents memory leaks and resource exhaustion. Modern approaches prefer explicit cleanup patterns over relying on destructors.",
+            },
+            {
+                "question": "Garbage collection vs manual memory management?",
+                "answer": "Garbage collection automatically frees unused memory, reducing bugs and development time but adds overhead and unpredictable pauses. Manual memory management (C++) gives control and performance but requires careful bookkeeping and risks memory leaks. Most modern languages use garbage collection. Performance-critical systems sometimes use manual management. Languages like Rust use ownership/borrowing to avoid both approaches' drawbacks.",
+            },
+            {
+                "question": "Object lifecycle in OOP?",
+                "answer": "Object lifecycle includes: 1) Creation (constructor called, memory allocated), 2) Initialization (state set up), 3) Usage (methods called, state modified), 4) Cleanup (resources released), 5) Destruction (memory deallocated). In garbage-collected languages, cleanup/destruction are automatic. Understanding lifecycle helps prevent memory leaks, resource exhaustion, and improper state. Proper initialization and cleanup are critical design concerns.",
+            },
+            {
+                "question": "Single vs multiple dispatch?",
+                "answer": "Single dispatch (used in most OOP languages) chooses the method based on the runtime type of one object (usually 'this'). Multiple dispatch chooses based on types of multiple objects. Java uses single dispatch. Languages like Common Lisp support multiple dispatch, which is more powerful but complex. Single dispatch is simpler and sufficient for most cases; multiple dispatch is useful when behavior depends on multiple objects' types.",
+            },
+            {
+                "question": "Mixins / traits - when to use?",
+                "answer": "Mixins (or traits) are classes providing reusable functionality without being parent classes. Languages like Ruby support mixins; languages like Scala have traits. Use when: multiple unrelated classes need the same behavior, but inheritance doesn't fit semantically, or you need multiple inheritance benefits without complexity. They provide code reuse without tight coupling. Mixins are more flexible than inheritance for cross-cutting functionality.",
+            },
+            {
+                "question": "Designing immutable objects?",
+                "answer": "Immutable objects can't be modified after creation. Design: make class final, fields private and final, initialize all fields in constructor, don't provide setters, return copies instead of mutable collections. Benefits: thread-safety (no locks needed), can be safely shared, useful as map keys or in caches. Tradeoff: creating slightly modified objects requires creating new instances. Essential for functional programming and concurrent systems.",
+            },
+            {
+                "question": "OOP pitfalls of overusing inheritance?",
+                "answer": "Common pitfalls: 1) Deep inheritance hierarchies become hard to understand and modify, 2) Tight coupling between parent and child classes, 3) Violating Liskov Substitution Principle, 4) The fragile base class problem - parent changes break children, 5) Code duplication in unrelated classes forced into inheritance. Solutions: favor composition over inheritance, keep hierarchies shallow, use interfaces, apply design principles like SOLID.",
+            },
+            {
+                "question": "Refactor a God class - how?",
+                "answer": "A God class has too many responsibilities, violating Single Responsibility Principle. Refactoring steps: 1) Identify distinct responsibilities using cohesion analysis, 2) Extract related data and methods into new classes, 3) Move methods to appropriate classes, 4) Use composition or inheritance where appropriate, 5) Apply design patterns (Facade, Decorator, Strategy), 6) Ensure each class has one clear purpose. Result: easier to test, modify, and understand.",
+            },
+        ],
+    },
+]
 
 
 @login_manager.user_loader
@@ -112,11 +265,336 @@ def sanitize_text(value, max_length):
     return cleaned
 
 
+def parse_text_items(raw_value, max_items=12, max_item_length=120):
+    normalized = (raw_value or "").replace("\r\n", "\n").replace("\r", "\n")
+    normalized = normalized.replace(";", "\n").replace(",", "\n")
+
+    items = []
+    seen = set()
+    for chunk in normalized.split("\n"):
+        item = " ".join(chunk.split())
+        if not item:
+            continue
+        item = sanitize_text(item, max_item_length)
+        lowered = item.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        items.append(item)
+        if len(items) >= max_items:
+            break
+    return items
+
+
+def build_ats_resume_text(resume_form):
+    full_name = sanitize_text(resume_form.get("full_name", ""), RESUME_FIELD_LIMITS["full_name"]) or "Your Name"
+    target_role = sanitize_text(resume_form.get("target_role", ""), RESUME_FIELD_LIMITS["target_role"]) or "Software Developer"
+    email = sanitize_text(resume_form.get("email", ""), RESUME_FIELD_LIMITS["email"])
+    phone = sanitize_text(resume_form.get("phone", ""), RESUME_FIELD_LIMITS["phone"])
+    location = sanitize_text(resume_form.get("location", ""), RESUME_FIELD_LIMITS["location"])
+    linkedin_url = sanitize_text(resume_form.get("linkedin_url", ""), RESUME_FIELD_LIMITS["linkedin_url"])
+    github_url = sanitize_text(resume_form.get("github_url", ""), RESUME_FIELD_LIMITS["github_url"])
+    summary = sanitize_text(resume_form.get("summary", ""), RESUME_FIELD_LIMITS["summary"])
+    if not summary:
+        summary = (
+            f"Entry-level {target_role} candidate with hands-on learning projects, "
+            "strong problem-solving skills, and focus on clean implementation."
+        )
+
+    skills = parse_text_items(
+        sanitize_text(resume_form.get("skills_text", ""), RESUME_FIELD_LIMITS["skills_text"]),
+        max_items=20,
+        max_item_length=80,
+    )
+    projects = parse_text_items(
+        sanitize_text(resume_form.get("projects_text", ""), RESUME_FIELD_LIMITS["projects_text"]),
+        max_items=10,
+        max_item_length=220,
+    )
+    experience = parse_text_items(
+        sanitize_text(resume_form.get("experience_text", ""), RESUME_FIELD_LIMITS["experience_text"]),
+        max_items=10,
+        max_item_length=220,
+    )
+    education = parse_text_items(
+        sanitize_text(resume_form.get("education_text", ""), RESUME_FIELD_LIMITS["education_text"]),
+        max_items=8,
+        max_item_length=220,
+    )
+    certifications = parse_text_items(
+        sanitize_text(resume_form.get("certifications_text", ""), RESUME_FIELD_LIMITS["certifications_text"]),
+        max_items=8,
+        max_item_length=220,
+    )
+
+    lines = [
+        full_name.upper(),
+        target_role,
+        "",
+    ]
+    contact_parts = [value for value in [location, phone, email] if value]
+    if contact_parts:
+        lines.append(" | ".join(contact_parts))
+
+    profile_links = []
+    if linkedin_url:
+        profile_links.append(f"LinkedIn: {linkedin_url}")
+    if github_url:
+        profile_links.append(f"GitHub: {github_url}")
+    if profile_links:
+        lines.append(" | ".join(profile_links))
+
+    lines.extend(
+        [
+            "",
+            "PROFESSIONAL SUMMARY",
+            summary,
+            "",
+            "SKILLS",
+        ]
+    )
+    if skills:
+        lines.extend(f"- {item}" for item in skills)
+    else:
+        lines.append("- Python")
+        lines.append("- SQL")
+        lines.append("- Problem Solving")
+
+    lines.append("")
+    lines.append("PROJECTS")
+    if projects:
+        lines.extend(f"- {item}" for item in projects)
+    else:
+        lines.append("- Add 2-3 relevant projects with measurable outcomes.")
+
+    lines.append("")
+    lines.append("EXPERIENCE")
+    if experience:
+        lines.extend(f"- {item}" for item in experience)
+    else:
+        lines.append("- Include internships, freelance work, or leadership activities.")
+
+    lines.append("")
+    lines.append("EDUCATION")
+    if education:
+        lines.extend(f"- {item}" for item in education)
+    else:
+        lines.append("- Add degree, institute, and graduation year.")
+
+    lines.append("")
+    lines.append("CERTIFICATIONS")
+    if certifications:
+        lines.extend(f"- {item}" for item in certifications)
+    else:
+        lines.append("- Add job-relevant certifications or coursework.")
+
+    return "\n".join(lines).strip()
+
+
+def build_project_ideas_fallback(topic, level, idea_count):
+    clean_topic = sanitize_text(topic, 120) or "software development"
+    clean_level = level if level in PROJECT_IDEA_LEVEL_OPTIONS else "Beginner"
+    capped_count = max(3, min(parse_int(idea_count, 5), 8))
+    focus_slug = clean_topic.lower()
+
+    if "data" in focus_slug:
+        stack = "Python, Pandas, SQL, Streamlit"
+    elif "web" in focus_slug or "frontend" in focus_slug or "backend" in focus_slug:
+        stack = "Python/Node.js, Flask/Express, SQL, HTML/CSS"
+    elif "ai" in focus_slug or "ml" in focus_slug:
+        stack = "Python, scikit-learn, FastAPI, SQLite"
+    else:
+        stack = "Python, Flask, SQLite, Bootstrap"
+
+    blueprints = [
+        {
+            "title": f"{clean_topic.title()} Tracker",
+            "build": "Track progress, deadlines, and milestones with filters and dashboard metrics.",
+            "bullet": "Built a full CRUD system with search, filtering, and analytics-ready data export.",
+        },
+        {
+            "title": "Interview Prep Portal",
+            "build": "Create topic-wise question practice, score history, and weak-area recommendations.",
+            "bullet": "Designed assessment workflows and improved feedback quality with structured scoring.",
+        },
+        {
+            "title": "Resume Analyzer",
+            "build": "Parse resumes, compare against job keywords, and provide ATS improvement suggestions.",
+            "bullet": "Implemented keyword-gap analysis and generated actionable resume recommendations.",
+        },
+        {
+            "title": "Team Collaboration Board",
+            "build": "Build task assignment, status movement, comments, and role-based access controls.",
+            "bullet": "Delivered collaborative workflow tooling with secure role-based permissions.",
+        },
+        {
+            "title": "Content Recommendation Engine",
+            "build": "Suggest personalized learning content using user preferences and activity signals.",
+            "bullet": "Built recommendation logic that improved content relevance and user retention.",
+        },
+        {
+            "title": "Support Ticket Classifier",
+            "build": "Auto-tag incoming issues by topic and priority, then route to correct queues.",
+            "bullet": "Automated classification pipeline to reduce manual triage time.",
+        },
+        {
+            "title": "Job Application Organizer",
+            "build": "Track applications, follow-up reminders, interview rounds, and outcome reports.",
+            "bullet": "Created productivity tooling to improve application tracking and interview readiness.",
+        },
+        {
+            "title": "Skill Gap Planner",
+            "build": "Map current skills to role requirements and generate weekly upskilling plans.",
+            "bullet": "Built planning automation that linked skill gaps to actionable learning tasks.",
+        },
+    ]
+
+    lines = [f"Project ideas for {clean_topic} ({clean_level}):"]
+    for idx, blueprint in enumerate(blueprints[:capped_count], start=1):
+        lines.append(f"{idx}. {blueprint['title']}")
+        lines.append(f"   Level: {clean_level}")
+        lines.append(f"   Stack: {stack}")
+        lines.append(f"   Build: {blueprint['build']}")
+        lines.append(f"   Resume bullet: {blueprint['bullet']}")
+    return "\n".join(lines)
+
+
+def get_ai_project_ideas(topic, level, idea_count):
+    clean_topic = sanitize_text(topic, 120) or "software development"
+    clean_level = level if level in PROJECT_IDEA_LEVEL_OPTIONS else "Beginner"
+    capped_count = max(3, min(parse_int(idea_count, 5), 8))
+
+    client, model = get_openai_client_and_model()
+    if not client:
+        return build_project_ideas_fallback(clean_topic, clean_level, capped_count)
+
+    prompt = (
+        "You are a practical software mentor.\n"
+        f"Generate {capped_count} ATS-friendly project ideas for topic: {clean_topic}.\n"
+        f"Candidate level: {clean_level}\n"
+        "For each idea include: title, stack, what to build, and one resume bullet.\n"
+        "Format as a clear numbered list. Keep concise and practical."
+    )
+    try:
+        response = client.with_options(timeout=12.0, max_retries=0).responses.create(
+            model=model,
+            input=prompt,
+            max_output_tokens=420,
+        )
+        answer = (response.output_text or "").strip()
+        if len(answer) < 40:
+            return build_project_ideas_fallback(clean_topic, clean_level, capped_count)
+        return answer
+    except Exception:
+        return build_project_ideas_fallback(clean_topic, clean_level, capped_count)
+
+
 def is_valid_http_url(value):
     if not value:
         return False
     parsed = urlparse(value.strip())
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def get_first_query_value(query_map, key):
+    values = query_map.get(key) or []
+    if not values:
+        return ""
+    return (values[0] or "").strip()
+
+
+def sanitize_youtube_token(value, max_length=64):
+    token = (value or "").strip()
+    if not token or len(token) > max_length:
+        return ""
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+    if any(char not in allowed for char in token):
+        return ""
+    return token
+
+
+def parse_youtube_start_seconds(query_params):
+    raw_value = get_first_query_value(query_params, "start") or get_first_query_value(query_params, "t")
+    if not raw_value:
+        return None
+
+    raw_value = raw_value.lower().strip()
+    if raw_value.isdigit():
+        parsed_seconds = int(raw_value)
+        return parsed_seconds if parsed_seconds > 0 else None
+
+    total_seconds = 0
+    current_number = ""
+    contains_unit_suffix = False
+    for char in raw_value:
+        if char.isdigit():
+            current_number += char
+            continue
+
+        if char not in {"h", "m", "s"} or not current_number:
+            return None
+
+        contains_unit_suffix = True
+        numeric_value = int(current_number)
+        if char == "h":
+            total_seconds += numeric_value * 3600
+        elif char == "m":
+            total_seconds += numeric_value * 60
+        else:
+            total_seconds += numeric_value
+        current_number = ""
+
+    if current_number:
+        tail_value = int(current_number)
+        total_seconds += tail_value
+
+    if not contains_unit_suffix and total_seconds <= 0:
+        return None
+    return total_seconds if total_seconds > 0 else None
+
+
+def build_youtube_embed_url(raw_url):
+    if not is_valid_http_url(raw_url):
+        return None
+
+    parsed = urlparse(raw_url.strip())
+    host = parsed.netloc.lower().replace("www.", "")
+    query_params = parse_qs(parsed.query)
+    path_parts = [segment for segment in parsed.path.split("/") if segment]
+    path_head = path_parts[0] if path_parts else ""
+
+    video_id = ""
+    playlist_id = ""
+
+    if host in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com"}:
+        if path_head == "watch":
+            video_id = sanitize_youtube_token(get_first_query_value(query_params, "v"), max_length=32)
+            playlist_id = sanitize_youtube_token(get_first_query_value(query_params, "list"), max_length=80)
+        elif path_head == "playlist":
+            playlist_id = sanitize_youtube_token(get_first_query_value(query_params, "list"), max_length=80)
+        elif path_head in {"shorts", "embed", "live"} and len(path_parts) > 1:
+            video_id = sanitize_youtube_token(path_parts[1], max_length=32)
+            playlist_id = sanitize_youtube_token(get_first_query_value(query_params, "list"), max_length=80)
+    elif host == "youtu.be" and path_parts:
+        video_id = sanitize_youtube_token(path_parts[0], max_length=32)
+        playlist_id = sanitize_youtube_token(get_first_query_value(query_params, "list"), max_length=80)
+    else:
+        return None
+
+    if not video_id and not playlist_id:
+        return None
+
+    if video_id:
+        query_args = {"rel": "0"}
+        if playlist_id:
+            query_args["list"] = playlist_id
+
+        start_seconds = parse_youtube_start_seconds(query_params)
+        if start_seconds:
+            query_args["start"] = str(start_seconds)
+        return f"https://www.youtube.com/embed/{video_id}?{urlencode(query_args)}"
+
+    return f"https://www.youtube.com/embed/videoseries?{urlencode({'list': playlist_id})}"
 
 
 def get_admin_access_token():
@@ -221,7 +699,7 @@ def save_uploaded_resource_file(file_storage):
     except Exception:
         return None, "Could not save uploaded file."
 
-    return f"resources/{unique_name}", None
+    return f"uploads/{unique_name}", None
 
 
 def commit_or_rollback():
@@ -296,11 +774,6 @@ def seed_categories_and_courses():
                 "description": "Hands-on ML foundations and practical model development.",
                 "playlist_url": "https://www.youtube.com/playlist?list=PLblh5JKOoLUICTaGLRoHQDuF_7q2GfuJF",
             },
-            {
-                "title": "Deep Learning Course",
-                "description": "Neural networks, CNN, RNN and modern deep learning workflows.",
-                "playlist_url": "https://www.youtube.com/playlist?list=PLZoTAELRMXVONh2lF-0Y3lQf5V6Qe--8-",
-            },
         ],
         "Data Analysis": [
             {
@@ -327,11 +800,6 @@ def seed_categories_and_courses():
             },
         ],
         "DevOps": [
-            {
-                "title": "DevOps Full Course",
-                "description": "CI/CD, containers, automation and cloud deployment.",
-                "playlist_url": "https://www.youtube.com/playlist?list=PLQ4bwxL7hYl4f4wP3M7Jin7M8hQd5a7rD",
-            },
             {
                 "title": "Docker and Kubernetes",
                 "description": "Container orchestration and deployment practices.",
@@ -413,6 +881,12 @@ def ensure_requested_courses():
             "title": "Neural Networks from Scratch",
             "description": "Practical deep learning implementation walkthrough.",
             "playlist_url": "https://www.youtube.com/watch?v=Wo5dMEP_BbI",
+        },
+        {
+            "category_name": "AI / Machine Learning",
+            "title": "Deep Learning Course (Requested)",
+            "description": "User-requested deep learning YouTube lecture.",
+            "playlist_url": "https://www.youtube.com/watch?v=VyWAvY2CF9c",
         },
         {
             "category_name": "AI / Machine Learning",
@@ -569,6 +1043,7 @@ def ensure_requested_courses():
 def remove_retired_requested_courses():
     retired_urls = [
         "https://www.youtube.com/playlist?list=PLjVLYmrlmjGdRs1sGqRrTE-EMraLclJga",
+        "https://www.youtube.com/playlist?list=PLQ4bwxL7hYl4f4wP3M7Jin7M8hQd5a7rD",
     ]
     Course.query.filter(Course.playlist_url.in_(retired_urls)).delete(synchronize_session=False)
     db.session.commit()
@@ -1261,16 +1736,14 @@ def admin_unlock():
     configured_token = get_admin_access_token()
     if request.method == "POST":
         token_input = request.form.get("admin_token", "").strip()
-        if not configured_token:
-            flash("ADMIN_ACCESS_TOKEN is not configured on the server.", "danger")
-            return redirect(url_for("dashboard"))
 
-        if token_input and secrets.compare_digest(token_input, configured_token):
+        if configured_token and token_input and secrets.compare_digest(token_input, configured_token):
             unlock_admin_session()
             flash("Admin access unlocked.", "success")
             return redirect(next_url)
 
-        flash("Invalid admin token.", "danger")
+        if configured_token or token_input:
+            flash("Invalid admin token.", "danger")
 
     return render_template(
         "admin_unlock.html",
@@ -1388,6 +1861,20 @@ def courses(category_id):
         user_progress_map=user_progress_map,
     )
 
+
+@app.route("/courses/<int:course_id>/watch")
+def watch_course(course_id):
+    course = Course.query.get_or_404(course_id)
+    embed_url = build_youtube_embed_url(course.playlist_url)
+    progress_item = None
+    if current_user.is_authenticated:
+        progress_item = UserCourseProgress.query.filter_by(user_id=current_user.id, course_id=course.id).first()
+    return render_template(
+        "watch_course.html",
+        course=course,
+        embed_url=embed_url,
+        progress_item=progress_item,
+    )
 
 @app.route("/courses/<int:course_id>/toggle-complete", methods=["POST"])
 @login_required
@@ -1601,6 +2088,51 @@ def mock_test():
     )
 
 
+@app.route("/interview-questions")
+def interview_questions():
+    return render_template("interview_questions.html", question_groups=INTERVIEW_QUESTION_GROUPS)
+
+
+@app.route("/resume-builder", methods=["GET", "POST"])
+def resume_builder():
+    resume_form = {
+        "full_name": "",
+        "target_role": "",
+        "email": "",
+        "phone": "",
+        "location": "",
+        "linkedin_url": "",
+        "github_url": "",
+        "summary": "",
+        "skills_text": "",
+        "projects_text": "",
+        "experience_text": "",
+        "education_text": "",
+        "certifications_text": "",
+    }
+    ats_resume_text = None
+
+    if current_user.is_authenticated:
+        resume_form["full_name"] = sanitize_text(getattr(current_user, "name", ""), RESUME_FIELD_LIMITS["full_name"])
+        resume_form["email"] = sanitize_text(getattr(current_user, "email", ""), RESUME_FIELD_LIMITS["email"])
+
+    if request.method == "POST":
+        for key, max_length in RESUME_FIELD_LIMITS.items():
+            resume_form[key] = sanitize_text(request.form.get(key, ""), max_length)
+
+        if not resume_form["full_name"]:
+            flash("Please enter your full name for the resume.", "warning")
+        else:
+            ats_resume_text = build_ats_resume_text(resume_form)
+            flash("ATS-friendly resume generated. Review and customize before applying.", "success")
+
+    return render_template(
+        "resume_builder.html",
+        resume_form=resume_form,
+        ats_resume_text=ats_resume_text,
+    )
+
+
 @app.route("/ai-assistant", methods=["GET", "POST"])
 def ai_assistant():
     """
@@ -1609,25 +2141,60 @@ def ai_assistant():
     """
     question = ""
     answer = None
+    project_topic = ""
+    project_level = "Beginner"
+    project_count = 5
 
     if request.method == "POST":
         action = request.form.get("action", "ask").strip().lower()
-        if action not in {"ask", "regenerate"}:
+        if action not in {"ask", "regenerate", "project_ideas"}:
             action = "ask"
 
-        question = sanitize_text(request.form.get("question", ""), 700)
-        if not question:
-            flash("Please enter a question.", "warning")
-        else:
-            try:
-                answer = get_ai_learning_help(question, force_refresh=(action == "regenerate"))
-                if action == "regenerate":
-                    flash("Generated a fresh answer.", "info")
-            except Exception:
-                answer = "AI assistant is temporarily unavailable. Please try again."
-                flash("Unable to fetch AI response right now.", "danger")
+        project_topic = sanitize_text(request.form.get("project_topic", ""), 120)
+        project_level = sanitize_text(request.form.get("project_level", "Beginner"), 30)
+        if project_level not in PROJECT_IDEA_LEVEL_OPTIONS:
+            project_level = "Beginner"
+        project_count = parse_int(request.form.get("project_count", "5"), 5, min_value=3, max_value=8)
 
-    return render_template("ai_assistant.html", question=question, answer=answer)
+        if action == "project_ideas":
+            answer = get_ai_project_ideas(project_topic, project_level, project_count)
+            question = f"Project ideas for {project_topic or 'software development'}"
+        else:
+            question = sanitize_text(request.form.get("question", ""), 700)
+            if not question:
+                flash("Please enter a question.", "warning")
+            else:
+                try:
+                    answer = get_ai_learning_help(question, force_refresh=(action == "regenerate"))
+                    if action == "regenerate":
+                        flash("Generated a fresh answer.", "info")
+                except Exception:
+                    answer = "AI assistant is temporarily unavailable. Please try again."
+                    flash("Unable to fetch AI response right now.", "danger")
+
+    return render_template(
+        "ai_assistant.html",
+        question=question,
+        answer=answer,
+        project_topic=project_topic,
+        project_level=project_level,
+        project_count=project_count,
+        project_level_options=PROJECT_IDEA_LEVEL_OPTIONS,
+    )
+
+
+@app.route("/uploads/<path:filename>")
+def uploaded_resource_file(filename):
+    safe_name = secure_filename(filename or "")
+    if not safe_name or safe_name != filename:
+        abort(404)
+
+    upload_dir = app.config["RESOURCES_UPLOAD_DIR"]
+    absolute_path = os.path.join(upload_dir, safe_name)
+    if not os.path.isfile(absolute_path):
+        abort(404)
+
+    return send_from_directory(upload_dir, safe_name, as_attachment=False)
 
 
 @app.route("/admin/resources", methods=["POST"])
