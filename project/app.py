@@ -6,7 +6,7 @@ import tempfile
 import time
 from datetime import datetime, timedelta
 from functools import wraps
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 from flask import Flask, abort, flash, redirect, render_template, request, send_from_directory, session, url_for
 from flask_login import LoginManager, current_user, login_required, logout_user
@@ -67,6 +67,7 @@ ADMIN_SESSION_TTL_SECONDS_DEFAULT = 4 * 60 * 60
 VALID_RESOURCE_TYPES = ("Video", "PDF", "Practice")
 RESOURCE_FILTER_OPTIONS = ("All", "Video", "PDF", "Practice")
 ALLOWED_RESOURCE_EXTENSIONS = {".pdf"}
+NOTES_FILE_EXTENSIONS = {".pdf", ".txt"}
 PROJECT_IDEA_LEVEL_OPTIONS = ("Beginner", "Intermediate", "Advanced")
 RESUME_FIELD_LIMITS = {
     "full_name": 120,
@@ -711,6 +712,173 @@ def commit_or_rollback():
         return False
 
 
+def get_interview_pdf_library():
+    static_subdir = "interview_questions"
+    library_dir = os.path.join(app.static_folder, static_subdir)
+    library_items = []
+    if not os.path.isdir(library_dir):
+        return library_items
+
+    manifest_path = os.path.join(library_dir, "manifest.json")
+    manifest_entries = []
+    if os.path.isfile(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as manifest_file:
+                manifest_payload = json.load(manifest_file)
+                if isinstance(manifest_payload, list):
+                    manifest_entries = [item for item in manifest_payload if isinstance(item, dict)]
+        except Exception:
+            manifest_entries = []
+
+    if manifest_entries:
+        for item in manifest_entries:
+            file_name = (item.get("file_name") or "").strip()
+            if not file_name.lower().endswith(".pdf"):
+                continue
+
+            absolute_path = os.path.join(library_dir, file_name)
+            if not os.path.isfile(absolute_path):
+                continue
+
+            title = sanitize_text((item.get("title") or os.path.splitext(file_name)[0]), 140)
+            size_mb = round(os.path.getsize(absolute_path) / (1024 * 1024), 2)
+            library_items.append(
+                {
+                    "id": len(library_items) + 1,
+                    "title": title,
+                    "file_name": file_name,
+                    "static_path": f"{static_subdir}/{file_name}",
+                    "size_mb": size_mb,
+                }
+            )
+        return library_items
+
+    for file_name in sorted(os.listdir(library_dir), key=lambda item: item.lower()):
+        if not file_name.lower().endswith(".pdf"):
+            continue
+
+        absolute_path = os.path.join(library_dir, file_name)
+        if not os.path.isfile(absolute_path):
+            continue
+
+        title = os.path.splitext(file_name)[0]
+        size_mb = round(os.path.getsize(absolute_path) / (1024 * 1024), 2)
+        library_items.append(
+            {
+                "id": len(library_items) + 1,
+                "title": title,
+                "file_name": file_name,
+                "static_path": f"{static_subdir}/{file_name}",
+                "size_mb": size_mb,
+            }
+        )
+
+    return library_items
+
+
+def get_interview_pdf_lookup():
+    lookup = {}
+    for item in get_interview_pdf_library():
+        safe_name = (item.get("file_name") or "").strip()
+        title = (item.get("title") or "").strip()
+        if safe_name:
+            lookup[safe_name.lower()] = safe_name
+        if title:
+            lookup[f"{title}.pdf".lower()] = safe_name
+
+    manifest_path = os.path.join(app.static_folder, "interview_questions", "manifest.json")
+    if os.path.isfile(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as manifest_file:
+                manifest_payload = json.load(manifest_file)
+            if isinstance(manifest_payload, list):
+                for row in manifest_payload:
+                    if not isinstance(row, dict):
+                        continue
+                    safe_name = (row.get("file_name") or "").strip()
+                    original_name = (row.get("original_name") or "").strip()
+                    if safe_name and original_name:
+                        lookup[original_name.lower()] = safe_name
+        except Exception:
+            pass
+
+    return lookup
+
+
+def format_file_size(file_size_bytes):
+    if file_size_bytes >= 1024 * 1024:
+        return f"{round(file_size_bytes / (1024 * 1024), 2)} MB"
+    return f"{round(file_size_bytes / 1024, 1)} KB"
+
+
+def get_notes_library():
+    static_subdir = "notes"
+    library_dir = os.path.join(app.static_folder, static_subdir)
+    library_items = []
+    if not os.path.isdir(library_dir):
+        return library_items
+
+    manifest_path = os.path.join(library_dir, "manifest.json")
+    manifest_entries = []
+    if os.path.isfile(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as manifest_file:
+                manifest_payload = json.load(manifest_file)
+                if isinstance(manifest_payload, list):
+                    manifest_entries = [item for item in manifest_payload if isinstance(item, dict)]
+        except Exception:
+            manifest_entries = []
+
+    if manifest_entries:
+        for item in manifest_entries:
+            file_name = (item.get("file_name") or "").strip()
+            extension = os.path.splitext(file_name)[1].lower()
+            if extension not in NOTES_FILE_EXTENSIONS:
+                continue
+
+            title = sanitize_text((item.get("title") or os.path.splitext(file_name)[0]), 140)
+            file_url = sanitize_text((item.get("file_url") or f"/notes-assets/{file_name}"), 240)
+            size_label = sanitize_text((item.get("size_label") or ""), 40)
+            if not size_label:
+                absolute_path = os.path.join(library_dir, file_name)
+                if os.path.isfile(absolute_path):
+                    size_label = format_file_size(os.path.getsize(absolute_path))
+                else:
+                    size_label = "Unknown size"
+            library_items.append(
+                {
+                    "title": title,
+                    "file_name": file_name,
+                    "file_url": file_url,
+                    "resource_type": "PDF" if extension == ".pdf" else "Text",
+                    "size_label": size_label,
+                }
+            )
+        return library_items
+
+    for file_name in sorted(os.listdir(library_dir), key=lambda item: item.lower()):
+        extension = os.path.splitext(file_name)[1].lower()
+        if extension not in NOTES_FILE_EXTENSIONS:
+            continue
+
+        absolute_path = os.path.join(library_dir, file_name)
+        if not os.path.isfile(absolute_path):
+            continue
+
+        file_size = os.path.getsize(absolute_path)
+        library_items.append(
+            {
+                "title": os.path.splitext(file_name)[0],
+                "file_name": file_name,
+                "file_url": url_for("static", filename=f"{static_subdir}/{file_name}"),
+                "resource_type": "PDF" if extension == ".pdf" else "Text",
+                "size_label": format_file_size(file_size),
+            }
+        )
+
+    return library_items
+
+
 def get_mock_test_token_serializer():
     return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt=MOCK_TEST_TOKEN_SALT)
 
@@ -875,6 +1043,12 @@ def ensure_requested_courses():
             "title": "JavaScript Full Course",
             "description": "Learn JavaScript from basics to advanced with practical projects.",
             "playlist_url": "https://www.youtube.com/watch?v=PkZNo7MFNFg",
+        },
+        {
+            "category_name": "Programming Languages",
+            "title": "React Programming Course",
+            "description": "Complete React playlist covering fundamentals and advanced concepts.",
+            "playlist_url": "https://www.youtube.com/watch?v=vz1RlUyrc3w&list=PLu71SKxNbfoDqgPchmvIsL4hTnJIrtige",
         },
         {
             "category_name": "AI / Machine Learning",
@@ -2090,7 +2264,44 @@ def mock_test():
 
 @app.route("/interview-questions")
 def interview_questions():
-    return render_template("interview_questions.html", question_groups=INTERVIEW_QUESTION_GROUPS)
+    interview_pdfs = get_interview_pdf_library()
+    return render_template(
+        "interview_questions.html",
+        question_groups=INTERVIEW_QUESTION_GROUPS,
+        interview_pdfs=interview_pdfs,
+    )
+
+
+@app.route("/interview-questions/pdf/<int:pdf_id>")
+def interview_question_pdf(pdf_id):
+    interview_pdfs = get_interview_pdf_library()
+    if pdf_id < 1 or pdf_id > len(interview_pdfs):
+        abort(404)
+
+    file_name = interview_pdfs[pdf_id - 1]["file_name"]
+    library_dir = os.path.join(app.static_folder, "interview_questions")
+    return send_from_directory(library_dir, file_name, as_attachment=False)
+
+
+@app.route("/interview-questions/legacy/<path:legacy_name>")
+def interview_question_legacy_file(legacy_name):
+    requested_name = unquote((legacy_name or "").strip())
+    if not requested_name:
+        abort(404)
+
+    lookup = get_interview_pdf_lookup()
+    file_name = lookup.get(requested_name.lower())
+    if not file_name:
+        abort(404)
+
+    library_dir = os.path.join(app.static_folder, "interview_questions")
+    return send_from_directory(library_dir, file_name, as_attachment=False)
+
+
+@app.route("/notes")
+def notes():
+    notes_library = get_notes_library()
+    return render_template("notes.html", notes_library=notes_library)
 
 
 @app.route("/resume-builder", methods=["GET", "POST"])
