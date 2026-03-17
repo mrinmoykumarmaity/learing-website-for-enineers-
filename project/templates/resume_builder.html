@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="mb-4">
+    <div class="hero rounded-4 p-4 p-lg-5 text-white">
+        <h1 class="h3 mb-2">ATS-Friendly Resume Builder</h1>
+        <p class="mb-0">Fill your details and generate a clean ATS-friendly resume draft you can customize.</p>
+    </div>
+</section>
+
+<section>
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <div class="row g-4">
+                <div class="col-lg-7">
+                    <form method="post" class="row g-3" id="resumeForm">
+                        <div class="col-md-6">
+                            <label class="form-label">Full Name</label>
+                            <input name="full_name" class="form-control" maxlength="120" value="{{ resume_form.full_name }}" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Target Role</label>
+                            <input name="target_role" class="form-control" maxlength="120" placeholder="Example: Python Backend Developer" value="{{ resume_form.target_role }}">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Email</label>
+                            <input name="email" type="email" class="form-control" maxlength="140" value="{{ resume_form.email }}">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Phone</label>
+                            <input name="phone" class="form-control" maxlength="40" value="{{ resume_form.phone }}">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Location</label>
+                            <input name="location" class="form-control" maxlength="120" value="{{ resume_form.location }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">LinkedIn URL</label>
+                            <input name="linkedin_url" class="form-control" maxlength="220" placeholder="https://linkedin.com/in/..." value="{{ resume_form.linkedin_url }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">GitHub URL</label>
+                            <input name="github_url" class="form-control" maxlength="220" placeholder="https://github.com/..." value="{{ resume_form.github_url }}">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Professional Summary</label>
+                            <textarea name="summary" rows="3" class="form-control" maxlength="600" placeholder="2-4 lines about your strengths and target role">{{ resume_form.summary }}</textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Skills (comma or new line separated)</label>
+                            <textarea name="skills_text" rows="3" class="form-control" maxlength="800" placeholder="Python, SQL, Flask, Git, Problem Solving">{{ resume_form.skills_text }}</textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Projects (one line per project with impact)</label>
+                            <textarea name="projects_text" rows="4" class="form-control" maxlength="1800" placeholder="Built a job portal using Flask and SQLite, reduced page load by 35%">{{ resume_form.projects_text }}</textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Experience (internship/freelance/leadership)</label>
+                            <textarea name="experience_text" rows="4" class="form-control" maxlength="1800" placeholder="Software Intern at XYZ: built API endpoints and improved response time">{{ resume_form.experience_text }}</textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Education</label>
+                            <textarea name="education_text" rows="3" class="form-control" maxlength="1200" placeholder="B.Tech in Computer Science, ABC University, 2025">{{ resume_form.education_text }}</textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Certifications</label>
+                            <textarea name="certifications_text" rows="3" class="form-control" maxlength="900" placeholder="AWS Cloud Practitioner, Google Data Analytics">{{ resume_form.certifications_text }}</textarea>
+                        </div>
+                        <div class="col-12">
+                            <button class="btn btn-primary">Generate ATS Resume</button>
+                        </div>
+                    </form>
+                </div>
+                <div class="col-lg-5">
+                    <div class="preview-pane">
+                        <h2 class="h6 mb-3">Live Preview</h2>
+                        <pre id="resumeLivePreview" class="mb-0" style="white-space: pre-wrap;">Start typing to preview your resume.</pre>
+                    </div>
+                </div>
+            </div>
+
+            {% if ats_resume_text %}
+            <hr>
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+                <h2 class="h5 mb-0">ATS Resume Output</h2>
+                <div class="d-flex flex-wrap gap-2">
+                    <button type="button" id="copyResumeBtn" class="btn btn-outline-primary btn-sm">Copy Resume</button>
+                    <form method="post" action="{{ url_for('resume_builder_pdf') }}">
+                        <textarea class="d-none" name="ats_text">{{ ats_resume_text }}</textarea>
+                        <button class="btn btn-outline-secondary btn-sm">Download PDF</button>
+                    </form>
+                </div>
+            </div>
+            <pre id="atsResumeText" class="p-3 bg-body-tertiary border rounded-3 mb-0" style="white-space: pre-wrap;">{{ ats_resume_text }}</pre>
+            {% endif %}
+        </div>
+    </div>
+</section>
+
+<script>
+(() => {
+    const copyBtn = document.getElementById('copyResumeBtn');
+    const resumeText = document.getElementById('atsResumeText');
+    const livePreview = document.getElementById('resumeLivePreview');
+    const form = document.getElementById('resumeForm');
+    if (!copyBtn || !resumeText) {
+        // continue to set up preview even if copy button is missing
+    }
+
+    if (copyBtn && resumeText) {
+        copyBtn.addEventListener('click', async () => {
+            const textValue = resumeText.textContent.trim();
+            if (!textValue || !navigator.clipboard || !navigator.clipboard.writeText) {
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(textValue);
+                copyBtn.textContent = 'Copied';
+                window.setTimeout(() => {
+                    copyBtn.textContent = 'Copy Resume';
+                }, 1400);
+            } catch (_err) {
+                copyBtn.textContent = 'Copy Failed';
+                window.setTimeout(() => {
+                    copyBtn.textContent = 'Copy Resume';
+                }, 1400);
+            }
+        });
+    }
+
+    const buildPreview = () => {
+        if (!form || !livePreview) {
+            return;
+        }
+        const getVal = (name) => {
+            const field = form.querySelector(`[name="${name}"]`);
+            return field ? field.value.trim() : '';
+        };
+        const lines = [];
+        const fullName = getVal('full_name') || 'Your Name';
+        const targetRole = getVal('target_role');
+        lines.push(fullName);
+        if (targetRole) {
+            lines.push(targetRole);
+        }
+        const contactBits = [getVal('email'), getVal('phone'), getVal('location')].filter(Boolean);
+        if (contactBits.length) {
+            lines.push(contactBits.join(' | '));
+        }
+        const links = [getVal('linkedin_url'), getVal('github_url')].filter(Boolean);
+        if (links.length) {
+            lines.push(links.join(' | '));
+        }
+        lines.push('');
+        const summary = getVal('summary');
+        if (summary) {
+            lines.push('SUMMARY');
+            lines.push(summary);
+            lines.push('');
+        }
+        const skills = getVal('skills_text');
+        if (skills) {
+            lines.push('SKILLS');
+            lines.push(skills.replace(/\n/g, ', '));
+            lines.push('');
+        }
+        const projects = getVal('projects_text');
+        if (projects) {
+            lines.push('PROJECTS');
+            lines.push(projects);
+            lines.push('');
+        }
+        const experience = getVal('experience_text');
+        if (experience) {
+            lines.push('EXPERIENCE');
+            lines.push(experience);
+            lines.push('');
+        }
+        const education = getVal('education_text');
+        if (education) {
+            lines.push('EDUCATION');
+            lines.push(education);
+            lines.push('');
+        }
+        const certifications = getVal('certifications_text');
+        if (certifications) {
+            lines.push('CERTIFICATIONS');
+            lines.push(certifications);
+        }
+        livePreview.textContent = lines.join('\n').trim() || 'Start typing to preview your resume.';
+    };
+
+    if (form) {
+        form.addEventListener('input', buildPreview);
+        buildPreview();
+    }
+})();
+</script>
+{% endblock %}

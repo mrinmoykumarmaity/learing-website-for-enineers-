@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mb-4">
+    <h1 class="h2 mb-2">Notes Library</h1>
+    <p class="text-muted mb-0">Handpicked notes and guides for quick interview and concept revision.</p>
+</div>
+
+{% if available_tags %}
+<div class="d-flex flex-wrap gap-2 mb-3">
+    <a class="btn btn-sm {% if not selected_tag %}btn-primary{% else %}btn-outline-primary{% endif %}" href="{{ url_for('notes') }}">All</a>
+    {% for tag in available_tags %}
+    <a class="btn btn-sm {% if tag == selected_tag %}btn-primary{% else %}btn-outline-primary{% endif %}" href="{{ url_for('notes', tag=tag) }}">{{ tag }}</a>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if notes_library %}
+<div class="row g-3">
+    {% for item in notes_library %}
+    <div class="col-md-6 col-lg-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body d-flex flex-column">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <h2 class="h6 mb-0">{{ item.title }}</h2>
+                    <span class="badge bg-secondary">{{ item.resource_type }}</span>
+                </div>
+                <p class="small text-muted mb-2">{{ item.preview | truncate(160, True, '...') }}</p>
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                    {% for tag in item.tags %}
+                    <span class="tag-chip">{{ tag }}</span>
+                    {% endfor %}
+                </div>
+                <p class="small text-muted mb-3">{{ item.size_label }}</p>
+                <a class="btn btn-outline-primary btn-sm mt-auto" href="{{ item.file_url }}" target="_blank" rel="noopener noreferrer">Open File</a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-secondary mb-0" role="alert">No notes available yet.</div>
+{% endif %}
+{% endblock %}

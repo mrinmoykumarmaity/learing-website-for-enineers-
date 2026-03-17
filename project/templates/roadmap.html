@@ -16,11 +16,19 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Target Career</label>
-                        <select name="target_career" class="form-select">
-                            <option>AI Engineer</option>
-                            <option>Data Analyst</option>
-                            <option>Software Developer</option>
+                        <select name="target_career" class="form-select" id="targetCareerSelect">
+                            {% for option in target_career_options %}
+                            <option value="{{ option }}" {% if option == selected_target_career %}selected{% endif %}>{{ option }}</option>
+                            {% endfor %}
                         </select>
+                        <input
+                            id="customTargetCareer"
+                            name="custom_target_career"
+                            class="form-control mt-2"
+                            placeholder="Enter a custom role"
+                            value="{{ custom_target_career }}"
+                            {% if selected_target_career != 'Other' %}style="display: none;"{% endif %}
+                        >
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Daily Study Time (hours)</label>
@@ -72,12 +80,31 @@
                 </a>
             </div>
         </div>
+        <div class="card border-0 shadow-sm mt-4">
+            <div class="card-body">
+                <h2 class="h5 mb-2">How to Become an AI Engineer (PDF)</h2>
+                <p class="small text-muted mb-3">CampusX masterlist guide to build your AI Engineer roadmap.</p>
+                <a
+                    class="btn btn-outline-info w-100"
+                    href="{{ url_for('static', filename='roadmaps/how-to-become-ai-engineer.pdf') }}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    Open AI Engineer PDF
+                </a>
+            </div>
+        </div>
     </div>
 
     <div class="col-lg-8">
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-body">
-                <h2 class="h5">Generated Roadmap</h2>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h2 class="h5 mb-0">Generated Roadmap</h2>
+                    {% if generated %}
+                    <a class="btn btn-outline-primary btn-sm" href="{{ url_for('roadmap_pdf_latest') }}">Download PDF</a>
+                    {% endif %}
+                </div>
                 {% if generated %}
                 <div class="timeline">
                     {% for month in generated %}
@@ -86,6 +113,20 @@
                         <p class="mb-1"><strong>Weekly Hours:</strong> {{ month.weekly_hours }}</p>
                         <p class="mb-1"><strong>Project:</strong> {{ month.project }}</p>
                         <p class="mb-1"><strong>Courses:</strong> {{ month.recommended_courses | join(', ') }}</p>
+                        <div class="checklist-grid mt-3">
+                            <label class="form-check">
+                                <input class="form-check-input roadmap-goal" type="checkbox" data-key="month-{{ month.month }}-goal-1">
+                                <span class="form-check-label">Finish core topic</span>
+                            </label>
+                            <label class="form-check">
+                                <input class="form-check-input roadmap-goal" type="checkbox" data-key="month-{{ month.month }}-goal-2">
+                                <span class="form-check-label">Ship the project</span>
+                            </label>
+                            <label class="form-check">
+                                <input class="form-check-input roadmap-goal" type="checkbox" data-key="month-{{ month.month }}-goal-3">
+                                <span class="form-check-label">Take 1 mock test</span>
+                            </label>
+                        </div>
                     </div>
                     {% endfor %}
                 </div>
@@ -106,6 +147,7 @@
                                 <th>Level</th>
                                 <th>Career</th>
                                 <th>Daily Hours</th>
+                                <th>PDF</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -115,9 +157,12 @@
                                 <td>{{ item.current_level }}</td>
                                 <td>{{ item.target_career }}</td>
                                 <td>{{ item.daily_study_time }}</td>
+                                <td>
+                                    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('roadmap_pdf', roadmap_id=item.id) }}">Download</a>
+                                </td>
                             </tr>
                             {% else %}
-                            <tr><td colspan="4" class="text-muted">No saved roadmaps yet.</td></tr>
+                            <tr><td colspan="5" class="text-muted">No saved roadmaps yet.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -126,4 +171,37 @@
         </div>
     </div>
 </div>
+
+<script>
+(() => {
+    const selectEl = document.getElementById('targetCareerSelect');
+    const customInput = document.getElementById('customTargetCareer');
+    if (selectEl && customInput) {
+        const toggleCustom = () => {
+            if (selectEl.value === 'Other') {
+                customInput.style.display = 'block';
+                customInput.required = true;
+            } else {
+                customInput.style.display = 'none';
+                customInput.required = false;
+                customInput.value = '';
+            }
+        };
+        selectEl.addEventListener('change', toggleCustom);
+        toggleCustom();
+    }
+
+    const goalCheckboxes = document.querySelectorAll('.roadmap-goal');
+    goalCheckboxes.forEach((box) => {
+        const key = box.dataset.key;
+        if (!key) {
+            return;
+        }
+        box.checked = localStorage.getItem(`roadmap-${key}`) === 'true';
+        box.addEventListener('change', () => {
+            localStorage.setItem(`roadmap-${key}`, box.checked ? 'true' : 'false');
+        });
+    });
+})();
+</script>
 {% endblock %}

@@ -7,6 +7,33 @@
     </div>
 </div>
 
+{% if goal_prompt_needed %}
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+        <h2 class="h6 mb-2">Set your learning goal</h2>
+        <p class="text-muted mb-3">Tell us your target role to personalize these recommendations.</p>
+        <form method="post" action="{{ url_for('save_goal_preferences') }}" class="row g-2 align-items-end">
+            <input type="hidden" name="next" value="{{ request.full_path }}">
+            <div class="col-md-8">
+                <label class="form-label">Target role</label>
+                <input class="form-control" name="target_role" maxlength="120" placeholder="Example: Data Analyst" required>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Weekly goal</label>
+                <input class="form-control" type="number" name="weekly_goal" min="1" max="10" value="3">
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-outline-primary w-100">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% elif goal_preference %}
+<div class="alert alert-info">
+    Personalized for {{ goal_preference.target_role }}. Update anytime on your dashboard.
+</div>
+{% endif %}
+
 <div class="row g-3">
     {% for course in courses %}
     <div class="col-md-6 col-lg-4">

@@ -42,6 +42,12 @@
                 Current test: <strong>{{ selected_subject }}</strong> | {{ total_questions }} questions |
                 {% if ai_generated %}AI generated{% else %}Fallback generated{% endif %}
             </p>
+            {% if not review_mode and timer_seconds %}
+            <div class="d-flex align-items-center gap-2 mt-2">
+                <span id="mockTimer" class="timer-pill" data-seconds="{{ timer_seconds }}">Time remaining: --:--</span>
+                <span class="small text-muted">Auto-submit when time ends.</span>
+            </div>
+            {% endif %}
             {% endif %}
         </div>
     </div>
@@ -90,26 +96,82 @@
         <div class="card-body">
             <h2 class="h5 mb-3">Interview Questions</h2>
             {% if questions %}
-            <form method="post">
-                <input type="hidden" name="action" value="submit">
-                <input type="hidden" name="payload_token" value="{{ payload_token }}">
+                {% if review_mode %}
+                <p class="text-muted">Review your answers below. Correct options are highlighted.</p>
                 {% for item in questions %}
                 <div class="mb-4">
                     <p class="fw-semibold mb-2">{{ loop.index }}. {{ item.question }}</p>
+                    {% set chosen = selected_answers.get(item.id) %}
                     {% for option in item.options %}
-                    <div class="form-check mb-1">
-                        <input class="form-check-input" type="radio" name="{{ item.id }}" id="{{ item.id }}_{{ loop.index }}" value="{{ loop.index0 }}" required>
-                        <label class="form-check-label" for="{{ item.id }}_{{ loop.index }}">{{ option }}</label>
+                    {% set is_correct = loop.index0 == item.answer_index %}
+                    {% set is_selected = chosen is not none and loop.index0 == chosen %}
+                    <div class="review-option {% if is_correct %}correct{% elif is_selected %}incorrect{% endif %}">
+                        <div class="d-flex justify-content-between align-items-start gap-2">
+                            <div>{{ option }}</div>
+                            {% if is_correct %}
+                            <span class="badge text-bg-success">Correct</span>
+                            {% elif is_selected %}
+                            <span class="badge text-bg-danger">Your answer</span>
+                            {% endif %}
+                        </div>
                     </div>
                     {% endfor %}
                 </div>
                 {% endfor %}
-                <button type="submit" class="btn btn-primary">Submit Mock Test</button>
-            </form>
+                {% else %}
+                <form method="post" id="mockTestForm">
+                    <input type="hidden" name="action" value="submit">
+                    <input type="hidden" name="payload_token" value="{{ payload_token }}">
+                    {% for item in questions %}
+                    <div class="mb-4">
+                        <p class="fw-semibold mb-2">{{ loop.index }}. {{ item.question }}</p>
+                        {% for option in item.options %}
+                        <div class="form-check mb-1">
+                            <input class="form-check-input" type="radio" name="{{ item.id }}" id="{{ item.id }}_{{ loop.index }}" value="{{ loop.index0 }}" required>
+                            <label class="form-check-label" for="{{ item.id }}_{{ loop.index }}">{{ option }}</label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endfor %}
+                    <button type="submit" class="btn btn-primary">Submit Mock Test</button>
+                </form>
+                {% endif %}
             {% else %}
             <p class="text-muted mb-0">Generate a test first, then answer the interview questions here.</p>
             {% endif %}
         </div>
     </div>
 </section>
+
+{% if questions and not review_mode and timer_seconds %}
+<script>
+(() => {
+    const timerEl = document.getElementById('mockTimer');
+    const formEl = document.getElementById('mockTestForm');
+    if (!timerEl || !formEl) {
+        return;
+    }
+    let remaining = parseInt(timerEl.dataset.seconds || '0', 10);
+    if (!remaining || remaining <= 0) {
+        return;
+    }
+    const formatTime = (seconds) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    };
+    timerEl.textContent = `Time remaining: ${formatTime(remaining)}`;
+    const interval = window.setInterval(() => {
+        remaining -= 1;
+        if (remaining <= 0) {
+            timerEl.textContent = 'Time is up. Submitting...';
+            window.clearInterval(interval);
+            formEl.submit();
+            return;
+        }
+        timerEl.textContent = `Time remaining: ${formatTime(remaining)}`;
+    }, 1000);
+})();
+</script>
+{% endif %}
 {% endblock %}

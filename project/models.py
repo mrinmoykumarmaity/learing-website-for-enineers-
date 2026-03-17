@@ -20,6 +20,34 @@ class User(UserMixin, db.Model):
     progress_entries = db.relationship("UserCourseProgress", back_populates="user", cascade="all, delete-orphan")
     roadmaps = db.relationship("Roadmap", back_populates="user", cascade="all, delete-orphan")
     mock_test_attempts = db.relationship("MockTestAttempt", back_populates="user", cascade="all, delete-orphan")
+    notes = db.relationship("UserNote", back_populates="user", cascade="all, delete-orphan")
+    preferences = db.relationship("UserPreference", back_populates="user", uselist=False, cascade="all, delete-orphan")
+
+
+class UserPreference(db.Model):
+    __tablename__ = "user_preferences"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    target_role = db.Column(db.String(120), nullable=True)
+    weekly_goal = db.Column(db.Integer, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    user = db.relationship("User", back_populates="preferences")
+
+
+class UserNote(db.Model):
+    __tablename__ = "user_notes"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
+    title = db.Column(db.String(160), nullable=False, index=True)
+    content = db.Column(db.Text, nullable=False)
+    author_name = db.Column(db.String(120), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    user = db.relationship("User", back_populates="notes")
 
 
 class CourseCategory(db.Model):
@@ -58,6 +86,17 @@ class LearningResource(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
+class ResourceEngagement(db.Model):
+    __tablename__ = "resource_engagements"
+
+    id = db.Column(db.Integer, primary_key=True)
+    resource_id = db.Column(db.Integer, db.ForeignKey("learning_resources.id"), unique=True, nullable=False, index=True)
+    open_count = db.Column(db.Integer, default=0, nullable=False)
+    last_opened_at = db.Column(db.DateTime, nullable=True)
+
+    resource = db.relationship("LearningResource")
+
+
 class UserCourseProgress(db.Model):
     __tablename__ = "user_course_progress"
 
@@ -73,6 +112,7 @@ class UserCourseProgress(db.Model):
     __table_args__ = (
         db.UniqueConstraint("user_id", "course_id", name="uq_user_course"),
     )
+
 
 class Roadmap(db.Model):
     __tablename__ = "roadmaps"

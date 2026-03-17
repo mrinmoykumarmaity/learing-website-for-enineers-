@@ -19,6 +19,19 @@
                 <span id="voiceStatus" class="small text-muted">Voice assistant idle.</span>
             </div>
 
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                {% set prompt_chips = [
+                    "Create a 4-week plan to become a backend developer",
+                    "Summarize REST APIs in simple terms",
+                    "Give me 5 interview questions on SQL joins",
+                    "Explain OOP with real-life examples",
+                    "Build a daily study schedule for data analytics"
+                ] %}
+                {% for chip in prompt_chips %}
+                <button type="button" class="prompt-chip" data-prompt="{{ chip }}">{{ chip }}</button>
+                {% endfor %}
+            </div>
+
             <form method="post" class="mb-3" id="aiQuestionForm">
                 <label for="question" class="form-label">Your question</label>
                 <textarea id="question" name="question" class="form-control" rows="4" placeholder="Example: Make a 2-month plan to become a backend Python developer." required>{{ question }}</textarea>
@@ -33,6 +46,24 @@
             <hr>
             <h2 class="h5">AI Answer</h2>
             <pre id="aiAnswerText" class="p-3 bg-body-tertiary border rounded-3 mb-0" style="white-space: pre-wrap;">{{ answer }}</pre>
+            {% endif %}
+
+            {% if history %}
+            <hr>
+            <h2 class="h5">Recent Q&amp;A</h2>
+            <div class="row g-3">
+                {% for item in history %}
+                <div class="col-12">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-body">
+                            <div class="small text-muted mb-1">{{ item.created_at }}</div>
+                            <div class="fw-semibold mb-2">{{ item.question }}</div>
+                            <div class="small text-muted">{{ item.answer | truncate(240, True, '...') }}</div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
             {% endif %}
         </div>
     </div>
@@ -52,6 +83,7 @@
     const askBtn = document.getElementById('askAiBtn');
     const regenBtn = document.getElementById('regenAiBtn');
     const waitHint = document.getElementById('aiWaitHint');
+    const promptButtons = document.querySelectorAll('[data-prompt]');
 
     function setStatus(text) {
         if (statusEl) {
@@ -219,6 +251,16 @@
             });
         }
     }
+
+    promptButtons.forEach((btn) => {
+        btn.addEventListener('click', () => {
+            if (!questionInput) {
+                return;
+            }
+            questionInput.value = btn.dataset.prompt || '';
+            questionInput.focus();
+        });
+    });
 
     function speakText(text) {
         if (!('speechSynthesis' in window)) {

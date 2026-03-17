@@ -40,6 +40,9 @@ h6,
 .hero-nav {
     background: linear-gradient(110deg, #0b2f70 0%, #0f5b88 55%, #12796f 100%);
     box-shadow: 0 8px 28px rgba(2, 22, 55, 0.28);
+    position: sticky;
+    top: 0;
+    z-index: 1020;
 }
 
 .navbar .nav-link {
@@ -51,6 +54,11 @@ h6,
 .navbar .nav-link:hover {
     background-color: rgba(255, 255, 255, 0.12);
     transform: translateY(-1px);
+}
+
+.navbar .nav-link.active {
+    background-color: rgba(255, 255, 255, 0.18);
+    font-weight: 600;
 }
 
 .hero {
@@ -124,6 +132,27 @@ h6,
     box-shadow: 0 8px 18px rgba(239, 159, 50, 0.25);
 }
 
+.skip-link {
+    position: absolute;
+    left: -999px;
+    top: 0.75rem;
+    background: #0f3d91;
+    color: #fff;
+    padding: 0.45rem 0.9rem;
+    border-radius: 999px;
+    z-index: 2000;
+    text-decoration: none;
+}
+
+.skip-link:focus {
+    left: 1rem;
+}
+
+:focus-visible {
+    outline: 3px solid #ef9f32;
+    outline-offset: 2px;
+}
+
 .hover-lift {
     transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
@@ -156,6 +185,100 @@ h6,
 .form-select:focus {
     border-color: #0f5b88;
     box-shadow: 0 0 0 0.2rem rgba(15, 91, 136, 0.15);
+}
+
+.prompt-chip {
+    border: 1px solid rgba(15, 23, 42, 0.15);
+    border-radius: 999px;
+    padding: 0.35rem 0.9rem;
+    font-size: 0.85rem;
+    background: rgba(255, 255, 255, 0.7);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.prompt-chip:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 12px rgba(15, 23, 42, 0.12);
+}
+
+.resource-toolbar {
+    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    border-radius: 1rem;
+    padding: 0.75rem;
+}
+
+.status-badge {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    padding: 0.25rem 0.6rem;
+}
+
+.status-complete {
+    background: rgba(16, 185, 129, 0.15);
+    color: #047857;
+}
+
+.status-progress {
+    background: rgba(59, 130, 246, 0.15);
+    color: #1d4ed8;
+}
+
+.status-new {
+    background: rgba(148, 163, 184, 0.2);
+    color: #475569;
+}
+
+.timer-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.08);
+    font-weight: 600;
+}
+
+.review-option {
+    border: 1px solid rgba(15, 23, 42, 0.1);
+    border-radius: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 0.5rem;
+    background: rgba(255, 255, 255, 0.7);
+}
+
+.review-option.correct {
+    border-color: rgba(16, 185, 129, 0.35);
+    background: rgba(16, 185, 129, 0.12);
+}
+
+.review-option.incorrect {
+    border-color: rgba(239, 68, 68, 0.35);
+    background: rgba(239, 68, 68, 0.12);
+}
+
+.tag-chip {
+    background: rgba(15, 23, 42, 0.08);
+    border-radius: 999px;
+    padding: 0.2rem 0.6rem;
+    font-size: 0.75rem;
+}
+
+.preview-pane {
+    border: 1px dashed rgba(15, 23, 42, 0.2);
+    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.7);
+    padding: 1rem;
+    min-height: 420px;
+}
+
+.checklist-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.5rem;
 }
 
 .timeline {
@@ -212,6 +335,37 @@ footer {
     background-color: rgba(15, 23, 42, 0.75);
     border-color: rgba(148, 163, 184, 0.35);
     color: #e2e8f0;
+}
+
+[data-bs-theme="dark"] .prompt-chip,
+[data-bs-theme="dark"] .resource-toolbar,
+[data-bs-theme="dark"] .preview-pane {
+    background: rgba(15, 23, 42, 0.7);
+    border-color: rgba(148, 163, 184, 0.25);
+}
+
+[data-bs-theme="dark"] :focus-visible {
+    outline-color: #f59e0b;
+}
+
+[data-bs-theme="dark"] .status-complete {
+    color: #6ee7b7;
+}
+
+[data-bs-theme="dark"] .status-progress {
+    color: #93c5fd;
+}
+
+[data-bs-theme="dark"] .status-new {
+    color: #cbd5f5;
+}
+
+[data-bs-theme="dark"] .timer-pill {
+    background: rgba(148, 163, 184, 0.2);
+}
+
+[data-bs-theme="dark"] .review-option {
+    background: rgba(15, 23, 42, 0.55);
 }
 
 [data-bs-theme="dark"] .metric-box {

@@ -1,24 +1,61 @@
+import io
 import json
 import os
 import random
 import secrets
 import tempfile
+import textwrap
 import time
 from datetime import datetime, timedelta
 from functools import wraps
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
-from flask import Flask, abort, flash, redirect, render_template, request, send_from_directory, session, url_for
+from flask import (
+    Flask,
+    abort,
+    flash,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    send_from_directory,
+    session,
+    url_for,
+)
 from flask_login import LoginManager, current_user, login_required, logout_user
-from sqlalchemy import func, text
+from sqlalchemy import func, or_, text
 from openai import OpenAI
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.utils import secure_filename
 
 try:
-    from models import Course, CourseCategory, LearningResource, MockTestAttempt, Roadmap, User, UserCourseProgress, db
+    from models import (
+        Course,
+        CourseCategory,
+        LearningResource,
+        ResourceEngagement,
+        MockTestAttempt,
+        Roadmap,
+        User,
+        UserCourseProgress,
+        UserPreference,
+        UserNote,
+        db,
+    )
 except ModuleNotFoundError:
-    from project.models import Course, CourseCategory, LearningResource, MockTestAttempt, Roadmap, User, UserCourseProgress, db
+    from project.models import (
+        Course,
+        CourseCategory,
+        LearningResource,
+        ResourceEngagement,
+        MockTestAttempt,
+        Roadmap,
+        User,
+        UserCourseProgress,
+        UserPreference,
+        UserNote,
+        db,
+    )
 
 
 app = Flask(__name__)
@@ -68,7 +105,45 @@ VALID_RESOURCE_TYPES = ("Video", "PDF", "Practice")
 RESOURCE_FILTER_OPTIONS = ("All", "Video", "PDF", "Practice")
 ALLOWED_RESOURCE_EXTENSIONS = {".pdf"}
 NOTES_FILE_EXTENSIONS = {".pdf", ".txt"}
+NOTE_SEARCH_QUERY_MAX_LENGTH = 100
+USER_NOTE_TITLE_MAX_LENGTH = 160
+USER_NOTE_AUTHOR_MAX_LENGTH = 120
+USER_NOTE_CONTENT_MAX_LENGTH = 4000
 PROJECT_IDEA_LEVEL_OPTIONS = ("Beginner", "Intermediate", "Advanced")
+DEFAULT_WEEKLY_GOAL = 3
+MAX_WEEKLY_GOAL = 10
+AI_HISTORY_MAX_ENTRIES = 6
+SECONDS_PER_MOCK_QUESTION = 75
+RESOURCE_SORT_OPTIONS = ("newest", "popular", "shortest", "oldest", "title")
+RESOURCE_SORT_LABELS = {
+    "newest": "Newest",
+    "popular": "Most Popular",
+    "shortest": "Shortest",
+    "oldest": "Oldest",
+    "title": "A-Z",
+}
+ROLE_KEYWORD_MAP = {
+    "ai engineer": ["ai", "machine learning", "deep learning", "ml", "python", "llm", "data"],
+    "data analyst": ["data", "analytics", "sql", "excel", "power bi", "tableau", "visualization"],
+    "software developer": ["software", "backend", "frontend", "web", "api", "python", "javascript", "java"],
+}
+ROLE_STOP_WORDS = {
+    "and",
+    "or",
+    "the",
+    "a",
+    "an",
+    "of",
+    "for",
+    "to",
+    "in",
+    "with",
+    "engineer",
+    "developer",
+    "analyst",
+    "specialist",
+    "manager",
+}
 RESUME_FIELD_LIMITS = {
     "full_name": 120,
     "target_role": 120,
@@ -712,6 +787,250 @@ def commit_or_rollback():
         return False
 
 
+def get_user_preferences(user_id):
+    if not user_id:
+        return None
+    return UserPreference.query.filter_by(user_id=user_id).first()
+
+
+def save_user_preferences(user_id, target_role, weekly_goal):
+    if not user_id:
+        return False
+    preference = UserPreference.query.filter_by(user_id=user_id).first()
+    if preference is None:
+        preference = UserPreference(user_id=user_id)
+        db.session.add(preference)
+    preference.target_role = target_role or None
+    preference.weekly_goal = weekly_goal
+    return commit_or_rollback()
+
+
+def normalize_target_role(raw_role):
+    cleaned = sanitize_text(raw_role or "", 120)
+    return cleaned
+
+
+def extract_goal_keywords(target_role):
+    if not target_role:
+        return []
+    role_key = target_role.strip().lower()
+    if role_key in ROLE_KEYWORD_MAP:
+        return ROLE_KEYWORD_MAP[role_key]
+
+    tokens = [token.strip() for token in role_key.replace("/", " ").replace("-", " ").split()]
+    keywords = []
+    for token in tokens:
+        if not token or token in ROLE_STOP_WORDS:
+            continue
+        keywords.append(token)
+    return keywords[:6]
+
+
+def apply_keyword_filter(query, keywords, *columns):
+    cleaned = [kw for kw in (keywords or []) if kw]
+    if not cleaned:
+        return query
+    clauses = []
+    for keyword in cleaned:
+        like_pattern = f"%{keyword}%"
+        column_clauses = [column.ilike(like_pattern) for column in columns if column is not None]
+        if column_clauses:
+            clauses.append(or_(*column_clauses))
+    if not clauses:
+        return query
+    return query.filter(or_(*clauses))
+
+
+def get_weekly_goal_progress(user_id, weekly_goal):
+    if not user_id:
+        return 0
+    end_date = datetime.utcnow().date()
+    start_date = end_date - timedelta(days=6)
+    completed_rows = (
+        UserCourseProgress.query.filter_by(user_id=user_id, completed=True)
+        .filter(UserCourseProgress.completed_at.isnot(None))
+        .all()
+    )
+    completed_count = 0
+    for row in completed_rows:
+        completed_date = row.completed_at.date()
+        if start_date <= completed_date <= end_date:
+            completed_count += 1
+    goal_value = weekly_goal or DEFAULT_WEEKLY_GOAL
+    goal_value = max(1, min(goal_value, MAX_WEEKLY_GOAL))
+    percent = round((completed_count / goal_value) * 100, 2) if goal_value else 0
+    return {
+        "count": completed_count,
+        "goal": goal_value,
+        "percent": min(percent, 100),
+    }
+
+
+def get_learning_streak(user_id):
+    if not user_id:
+        return 0
+    completed_rows = (
+        UserCourseProgress.query.filter_by(user_id=user_id, completed=True)
+        .filter(UserCourseProgress.completed_at.isnot(None))
+        .all()
+    )
+    completion_dates = {row.completed_at.date() for row in completed_rows if row.completed_at}
+    if not completion_dates:
+        return 0
+    streak = 0
+    current_day = datetime.utcnow().date()
+    while current_day in completion_dates:
+        streak += 1
+        current_day -= timedelta(days=1)
+    return streak
+
+
+def get_recommended_courses_for_goal(completed_ids, target_role, limit=8):
+    query = Course.query
+    if completed_ids:
+        query = query.filter(~Course.id.in_(completed_ids))
+    keywords = extract_goal_keywords(target_role)
+    query = apply_keyword_filter(query, keywords, Course.title, Course.description)
+    return query.order_by(Course.title.asc()).limit(limit).all()
+
+
+def get_resource_size_hint(resource):
+    if resource.file_path:
+        file_name = os.path.basename(resource.file_path)
+        upload_dir = app.config["RESOURCES_UPLOAD_DIR"]
+        candidate_path = os.path.join(upload_dir, file_name)
+        if os.path.isfile(candidate_path):
+            return os.path.getsize(candidate_path)
+        static_path = os.path.join(app.static_folder, resource.file_path)
+        if os.path.isfile(static_path):
+            return os.path.getsize(static_path)
+    description = resource.description or ""
+    return 200000 + len(description) * 100
+
+
+def get_resource_popularity_map(resource_ids):
+    if not resource_ids:
+        return {}
+    rows = ResourceEngagement.query.filter(ResourceEngagement.resource_id.in_(resource_ids)).all()
+    return {row.resource_id: row.open_count for row in rows}
+
+
+def record_resource_open(resource_id):
+    engagement = ResourceEngagement.query.filter_by(resource_id=resource_id).first()
+    if engagement is None:
+        engagement = ResourceEngagement(resource_id=resource_id, open_count=0)
+        db.session.add(engagement)
+    engagement.open_count += 1
+    engagement.last_opened_at = datetime.utcnow()
+    commit_or_rollback()
+
+
+def build_simple_pdf(title, lines):
+    safe_title = sanitize_text(title or "Document", 120) or "Document"
+    wrapped_lines = []
+    for line in lines:
+        cleaned = (line or "").strip()
+        if not cleaned:
+            wrapped_lines.append("")
+            continue
+        wrapped_lines.extend(textwrap.wrap(cleaned, width=95) or [""])
+
+    def pdf_escape(value):
+        return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+    content_lines = ["BT", "/F1 12 Tf", "50 760 Td", f"({pdf_escape(safe_title)}) Tj"]
+    for line in wrapped_lines:
+        content_lines.append("0 -14 Td")
+        content_lines.append(f"({pdf_escape(line)}) Tj")
+    content_lines.append("ET")
+    content_stream = "\n".join(content_lines)
+    content_bytes = content_stream.encode("latin-1", errors="ignore")
+
+    objects = []
+    objects.append(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+    objects.append(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n")
+    objects.append(
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n"
+    )
+    objects.append(
+        f"4 0 obj\n<< /Length {len(content_bytes)} >>\nstream\n".encode("latin-1")
+        + content_bytes
+        + b"\nendstream\nendobj\n"
+    )
+    objects.append(b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n")
+
+    offsets = []
+    pdf_output = io.BytesIO()
+    pdf_output.write(b"%PDF-1.4\n")
+    for obj in objects:
+        offsets.append(pdf_output.tell())
+        pdf_output.write(obj)
+    xref_position = pdf_output.tell()
+    pdf_output.write(f"xref\n0 {len(objects) + 1}\n".encode("latin-1"))
+    pdf_output.write(b"0000000000 65535 f \n")
+    for offset in offsets:
+        pdf_output.write(f"{offset:010d} 00000 n \n".encode("latin-1"))
+    pdf_output.write(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_position}\n%%EOF".encode(
+            "latin-1"
+        )
+    )
+    return pdf_output.getvalue()
+
+
+def build_roadmap_pdf_lines(payload):
+    generated = payload.get("generated") or []
+    lines = [
+        f"Current level: {payload.get('current_level', 'Beginner')}",
+        f"Target career: {payload.get('target_career', 'Software Developer')}",
+        f"Daily study time: {payload.get('daily_study_time', 2)} hours",
+        "",
+        "Roadmap details:",
+        "",
+    ]
+    for month in generated:
+        lines.append(f"Month {month.get('month')}: {month.get('focus_topic')}")
+        lines.append(f"Weekly hours: {month.get('weekly_hours')}")
+        lines.append(f"Project: {month.get('project')}")
+        courses = month.get("recommended_courses") or []
+        if courses:
+            lines.append(f"Courses: {', '.join(courses)}")
+        lines.append("")
+    return lines
+
+
+def infer_resource_tags(title):
+    if not title:
+        return ["General"]
+    lowered = title.lower()
+    tag_map = {
+        "AI": ["ai", "machine learning", "ml", "deep learning", "llm"],
+        "Data": ["data", "analytics", "analysis", "dataset"],
+        "SQL": ["sql", "database"],
+        "Python": ["python"],
+        "Web": ["web", "html", "css", "javascript", "frontend", "backend"],
+        "OOP": ["oop", "object oriented"],
+        "DSA": ["dsa", "data structure", "algorithm"],
+        "System Design": ["system design", "architecture", "scalable"],
+        "Interview": ["interview", "question"],
+        "Resume": ["resume", "cv"],
+    }
+    tags = []
+    for tag, keywords in tag_map.items():
+        if any(keyword in lowered for keyword in keywords):
+            tags.append(tag)
+    return tags or ["General"]
+
+
+def build_preview_snippet(title, preview_text=None):
+    if preview_text:
+        return sanitize_text(preview_text, 180)
+    if not title:
+        return "Resource preview not available."
+    return f"Quick reference notes for {title}."
+
+
 def get_interview_pdf_library():
     static_subdir = "interview_questions"
     library_dir = os.path.join(app.static_folder, static_subdir)
@@ -741,6 +1060,12 @@ def get_interview_pdf_library():
                 continue
 
             title = sanitize_text((item.get("title") or os.path.splitext(file_name)[0]), 140)
+            raw_tags = item.get("tags")
+            tags = [sanitize_text(tag, 40) for tag in raw_tags] if isinstance(raw_tags, list) else []
+            if not tags:
+                tags = infer_resource_tags(title)
+            preview_text = item.get("preview") or item.get("summary")
+            preview = build_preview_snippet(title, preview_text)
             size_mb = round(os.path.getsize(absolute_path) / (1024 * 1024), 2)
             library_items.append(
                 {
@@ -749,6 +1074,8 @@ def get_interview_pdf_library():
                     "file_name": file_name,
                     "static_path": f"{static_subdir}/{file_name}",
                     "size_mb": size_mb,
+                    "tags": tags,
+                    "preview": preview,
                 }
             )
         return library_items
@@ -762,6 +1089,8 @@ def get_interview_pdf_library():
             continue
 
         title = os.path.splitext(file_name)[0]
+        tags = infer_resource_tags(title)
+        preview = build_preview_snippet(title)
         size_mb = round(os.path.getsize(absolute_path) / (1024 * 1024), 2)
         library_items.append(
             {
@@ -770,6 +1099,8 @@ def get_interview_pdf_library():
                 "file_name": file_name,
                 "static_path": f"{static_subdir}/{file_name}",
                 "size_mb": size_mb,
+                "tags": tags,
+                "preview": preview,
             }
         )
 
@@ -845,6 +1176,19 @@ def get_notes_library():
                     size_label = format_file_size(os.path.getsize(absolute_path))
                 else:
                     size_label = "Unknown size"
+            preview_text = item.get("preview") or item.get("summary")
+            if not preview_text and extension == ".txt":
+                absolute_path = os.path.join(library_dir, file_name)
+                if os.path.isfile(absolute_path):
+                    try:
+                        with open(absolute_path, "r", encoding="utf-8", errors="ignore") as note_file:
+                            preview_text = note_file.read(220)
+                    except Exception:
+                        preview_text = ""
+            raw_tags = item.get("tags")
+            tags = [sanitize_text(tag, 40) for tag in raw_tags] if isinstance(raw_tags, list) else []
+            if not tags:
+                tags = infer_resource_tags(title)
             library_items.append(
                 {
                     "title": title,
@@ -852,6 +1196,8 @@ def get_notes_library():
                     "file_url": file_url,
                     "resource_type": "PDF" if extension == ".pdf" else "Text",
                     "size_label": size_label,
+                    "tags": tags,
+                    "preview": build_preview_snippet(title, preview_text),
                 }
             )
         return library_items
@@ -866,6 +1212,14 @@ def get_notes_library():
             continue
 
         file_size = os.path.getsize(absolute_path)
+        preview_text = ""
+        if extension == ".txt":
+            try:
+                with open(absolute_path, "r", encoding="utf-8", errors="ignore") as note_file:
+                    preview_text = note_file.read(220)
+            except Exception:
+                preview_text = ""
+        tags = infer_resource_tags(os.path.splitext(file_name)[0])
         library_items.append(
             {
                 "title": os.path.splitext(file_name)[0],
@@ -873,6 +1227,8 @@ def get_notes_library():
                 "file_url": url_for("static", filename=f"{static_subdir}/{file_name}"),
                 "resource_type": "PDF" if extension == ".pdf" else "Text",
                 "size_label": format_file_size(file_size),
+                "tags": tags,
+                "preview": build_preview_snippet(os.path.splitext(file_name)[0], preview_text),
             }
         )
 
@@ -1045,12 +1401,6 @@ def ensure_requested_courses():
             "playlist_url": "https://www.youtube.com/watch?v=PkZNo7MFNFg",
         },
         {
-            "category_name": "Programming Languages",
-            "title": "React Programming Course",
-            "description": "Complete React playlist covering fundamentals and advanced concepts.",
-            "playlist_url": "https://www.youtube.com/watch?v=vz1RlUyrc3w&list=PLu71SKxNbfoDqgPchmvIsL4hTnJIrtige",
-        },
-        {
             "category_name": "AI / Machine Learning",
             "title": "Neural Networks from Scratch",
             "description": "Practical deep learning implementation walkthrough.",
@@ -1082,9 +1432,9 @@ def ensure_requested_courses():
         },
         {
             "category_name": "Web Development",
-            "title": "React JS Full Course",
-            "description": "Build frontend apps with React and modern tooling.",
-            "playlist_url": "https://www.youtube.com/watch?v=bMknfKXIFA8",
+            "title": "React JS Course (Requested)",
+            "description": "User-requested React YouTube playlist.",
+            "playlist_url": "https://www.youtube.com/watch?v=vz1RlUyrc3w&list=PLu71SKxNbfoDqgPchmvIsL4hTnJIrtige",
         },
         {
             "category_name": "Web Development",
@@ -1244,6 +1594,13 @@ def ensure_default_learning_resources():
             "description": "Step-by-step guide and daily routine for aspiring data analysts.",
             "resource_type": "PDF",
             "file_path": "roadmaps/how-to-become-data-analyst.pdf",
+            "external_url": None,
+        },
+        {
+            "title": "How to Become an AI Engineer (PDF)",
+            "description": "CampusX masterlist guide to build your AI Engineer roadmap.",
+            "resource_type": "PDF",
+            "file_path": "roadmaps/how-to-become-ai-engineer.pdf",
             "external_url": None,
         },
     ]
@@ -1579,7 +1936,23 @@ def build_roadmap(current_level, target_career, daily_study_time):
     }
 
     level_multiplier = {"Beginner": 1, "Intermediate": 2, "Advanced": 3}.get(current_level, 1)
-    profile = career_map[target_career]
+    profile = career_map.get(target_career)
+    if not profile:
+        generic_topics = [
+            f"Foundations for {target_career}",
+            "Core programming and problem solving",
+            "Project building and portfolio",
+            "Interview prep and mock tests",
+        ]
+        profile = {
+            "core_topics": generic_topics,
+            "projects": [
+                f"Build a beginner {target_career} project",
+                f"Create a portfolio-ready {target_career} case study",
+                "Ship and document a capstone project",
+            ],
+            "preferred_categories": ["Software Engineering", "Web Development", "Data Analysis"],
+        }
 
     recommended_courses = []
     for category_name in profile["preferred_categories"]:
@@ -1948,18 +2321,47 @@ def dashboard():
     if selected_resource_filter not in RESOURCE_FILTER_OPTIONS:
         selected_resource_filter = "All"
 
-    resources_query = LearningResource.query.order_by(LearningResource.created_at.desc())
+    resource_search_query = sanitize_text(request.args.get("resource_q", ""), 120)
+    resource_sort = request.args.get("resource_sort", "newest").strip().lower()
+    if resource_sort not in RESOURCE_SORT_OPTIONS:
+        resource_sort = "newest"
+
+    resources_query = LearningResource.query
     if selected_resource_filter != "All":
         resources_query = resources_query.filter_by(resource_type=selected_resource_filter)
-    learning_resources = resources_query.limit(30).all()
+    if resource_search_query:
+        like_pattern = f"%{resource_search_query}%"
+        resources_query = resources_query.filter(
+            (LearningResource.title.ilike(like_pattern)) | (LearningResource.description.ilike(like_pattern))
+        )
+
+    sort_map = {
+        "newest": LearningResource.created_at.desc(),
+        "oldest": LearningResource.created_at.asc(),
+        "title": LearningResource.title.asc(),
+    }
+    base_sort_key = resource_sort if resource_sort in sort_map else "newest"
+    resources_query = resources_query.order_by(sort_map.get(base_sort_key, LearningResource.created_at.desc()))
 
     total_courses = Course.query.count()
     weekly_progress_chart = {"labels": [], "daily": [], "cumulative": []}
+    goal_preference = None
+    weekly_goal = DEFAULT_WEEKLY_GOAL
+    weekly_goal_progress = {"count": 0, "goal": DEFAULT_WEEKLY_GOAL, "percent": 0}
+    learning_streak = 0
+    next_action_course = None
+    next_action_reason = ""
+    goal_filter_active = False
     if current_user.is_authenticated:
         completed_courses, total_courses, _ = get_user_course_completion_stats(current_user.id)
         overall_progress = round((completed_courses / total_courses) * 100, 2) if total_courses else 0
         user_progress_map = get_user_progress_map(current_user.id)
         weekly_progress_chart = get_weekly_progress_chart(current_user.id)
+        goal_preference = get_user_preferences(current_user.id)
+        if goal_preference and goal_preference.weekly_goal:
+            weekly_goal = goal_preference.weekly_goal
+        weekly_goal_progress = get_weekly_goal_progress(current_user.id, weekly_goal)
+        learning_streak = get_learning_streak(current_user.id)
         latest_roadmap = (
             Roadmap.query.filter_by(user_id=current_user.id)
             .order_by(Roadmap.created_at.desc())
@@ -1976,6 +2378,66 @@ def dashboard():
         user_progress_map = {}
         latest_roadmap = None
         latest_mock_test = None
+
+    goal_role = goal_preference.target_role if goal_preference else ""
+    goal_prompt_needed = current_user.is_authenticated and not goal_role
+    goal_toggle = request.args.get("goal", "on").strip().lower()
+    goal_filter_active = bool(goal_role) and goal_toggle != "off"
+
+    prefetch_limit = 60 if resource_sort in {"popular", "shortest"} else 30
+
+    if goal_filter_active:
+        keywords = extract_goal_keywords(goal_role)
+        goal_filtered_query = apply_keyword_filter(
+            resources_query,
+            keywords,
+            LearningResource.title,
+            LearningResource.description,
+        )
+        learning_resources = goal_filtered_query.limit(prefetch_limit).all()
+        if not learning_resources:
+            goal_filter_active = False
+            learning_resources = resources_query.limit(prefetch_limit).all()
+    else:
+        learning_resources = resources_query.limit(prefetch_limit).all()
+
+    if resource_sort == "popular":
+        counts = get_resource_popularity_map([resource.id for resource in learning_resources])
+        learning_resources.sort(key=lambda resource: counts.get(resource.id, 0), reverse=True)
+    elif resource_sort == "shortest":
+        learning_resources.sort(key=get_resource_size_hint)
+
+    learning_resources = learning_resources[:30]
+
+    last_course_id = session.get("last_course_id")
+    if last_course_id:
+        last_course = Course.query.get(last_course_id)
+        if last_course:
+            if current_user.is_authenticated:
+                progress_item = user_progress_map.get(last_course.id)
+                if not (progress_item and progress_item.completed):
+                    next_action_course = last_course
+                    next_action_reason = "Continue your last lesson"
+            else:
+                next_action_course = last_course
+                next_action_reason = "Continue your last lesson"
+
+    if current_user.is_authenticated and not next_action_course:
+        completed_ids = {
+            p.course_id
+            for p in UserCourseProgress.query.filter_by(user_id=current_user.id, completed=True).all()
+        }
+        recommended = get_recommended_courses_for_goal(completed_ids, goal_role, limit=1)
+        if not recommended:
+            recommended = (
+                Course.query.filter(~Course.id.in_(completed_ids))
+                .order_by(Course.title.asc())
+                .limit(1)
+                .all()
+            )
+        if recommended:
+            next_action_course = recommended[0]
+            next_action_reason = "Suggested next course"
 
     category_progress = []
 
@@ -2008,10 +2470,50 @@ def dashboard():
         latest_roadmap=latest_roadmap,
         latest_mock_test=latest_mock_test,
         weekly_progress_chart=weekly_progress_chart,
+        weekly_goal_progress=weekly_goal_progress,
+        learning_streak=learning_streak,
         learning_resources=learning_resources,
         selected_resource_filter=selected_resource_filter,
         resource_filter_options=RESOURCE_FILTER_OPTIONS,
+        resource_sort_options=RESOURCE_SORT_LABELS,
+        resource_search_query=resource_search_query,
+        resource_sort=resource_sort,
+        goal_preference=goal_preference,
+        goal_prompt_needed=goal_prompt_needed,
+        goal_filter_active=goal_filter_active,
+        next_action_course=next_action_course,
+        next_action_reason=next_action_reason,
     )
+
+
+@app.route("/preferences/goal", methods=["POST"])
+@login_required
+def save_goal_preferences():
+    target_role = normalize_target_role(request.form.get("target_role", ""))
+    custom_role = normalize_target_role(request.form.get("custom_target_role", ""))
+    if custom_role:
+        target_role = custom_role
+
+    weekly_goal = parse_int(
+        request.form.get("weekly_goal", DEFAULT_WEEKLY_GOAL),
+        DEFAULT_WEEKLY_GOAL,
+        min_value=1,
+        max_value=MAX_WEEKLY_GOAL,
+    )
+
+    if not target_role:
+        flash("Please enter a goal role to personalize your plan.", "warning")
+        return redirect(url_for("dashboard"))
+
+    if not save_user_preferences(current_user.id, target_role, weekly_goal):
+        flash("Unable to save your goal right now.", "danger")
+        return redirect(url_for("dashboard"))
+
+    flash("Your learning goal has been saved.", "success")
+    next_url = request.form.get("next")
+    if is_safe_next_url(next_url):
+        return redirect(next_url)
+    return redirect(url_for("dashboard"))
 
 
 @app.route("/courses/<int:category_id>")
@@ -2043,6 +2545,11 @@ def watch_course(course_id):
     progress_item = None
     if current_user.is_authenticated:
         progress_item = UserCourseProgress.query.filter_by(user_id=current_user.id, course_id=course.id).first()
+        if progress_item is None:
+            progress_item = UserCourseProgress(user_id=current_user.id, course_id=course.id, completed=False)
+            db.session.add(progress_item)
+            commit_or_rollback()
+    session["last_course_id"] = course.id
     return render_template(
         "watch_course.html",
         course=course,
@@ -2078,13 +2585,24 @@ def toggle_course_completion(course_id):
 @app.route("/roadmap", methods=["GET", "POST"])
 def roadmap():
     generated = None
+    selected_target_career = "Software Developer"
+    custom_target_career = ""
 
     if request.method == "POST":
         current_level = request.form.get("current_level", "Beginner")
-        target_career = request.form.get("target_career", "Software Developer")
+        selected_target_career = request.form.get("target_career", "Software Developer")
+        custom_target_career = sanitize_text(request.form.get("custom_target_career", ""), 80)
+        target_career = custom_target_career or selected_target_career
         daily_study_time = parse_int(request.form.get("daily_study_time", 2), 2, min_value=1, max_value=10)
 
         generated = build_roadmap(current_level, target_career, daily_study_time)
+        session["last_roadmap_payload"] = {
+            "current_level": current_level,
+            "target_career": target_career,
+            "daily_study_time": daily_study_time,
+            "generated": generated,
+            "created_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
+        }
         if current_user.is_authenticated:
             roadmap_record = Roadmap(
                 user_id=current_user.id,
@@ -2109,7 +2627,56 @@ def roadmap():
             .all()
         )
 
-    return render_template("roadmap.html", generated=generated, saved_roadmaps=saved_roadmaps)
+    return render_template(
+        "roadmap.html",
+        generated=generated,
+        saved_roadmaps=saved_roadmaps,
+        selected_target_career=selected_target_career,
+        custom_target_career=custom_target_career,
+        target_career_options=["AI Engineer", "Data Analyst", "Software Developer", "Other"],
+    )
+
+
+@app.route("/roadmap/pdf/latest")
+def roadmap_pdf_latest():
+    payload = session.get("last_roadmap_payload")
+    if not payload:
+        flash("Generate a roadmap first to download the PDF.", "warning")
+        return redirect(url_for("roadmap"))
+    lines = build_roadmap_pdf_lines(payload)
+    pdf_bytes = build_simple_pdf("Learning Roadmap", lines)
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name="learning-roadmap.pdf",
+    )
+
+
+@app.route("/roadmap/pdf/<int:roadmap_id>")
+@login_required
+def roadmap_pdf(roadmap_id):
+    roadmap_item = Roadmap.query.filter_by(id=roadmap_id, user_id=current_user.id).first()
+    if roadmap_item is None:
+        abort(404)
+    try:
+        generated = json.loads(roadmap_item.content_json)
+    except Exception:
+        generated = []
+    payload = {
+        "current_level": roadmap_item.current_level,
+        "target_career": roadmap_item.target_career,
+        "daily_study_time": roadmap_item.daily_study_time,
+        "generated": generated,
+    }
+    lines = build_roadmap_pdf_lines(payload)
+    pdf_bytes = build_simple_pdf("Learning Roadmap", lines)
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name="learning-roadmap.pdf",
+    )
 
 
 @app.route("/recommendations")
@@ -2120,14 +2687,29 @@ def recommendations():
         for p in UserCourseProgress.query.filter_by(user_id=current_user.id, completed=True).all()
     }
 
-    recommended = (
-        Course.query.filter(~Course.id.in_(completed_ids))
-        .order_by(Course.title.asc())
-        .limit(8)
-        .all()
-    )
+    goal_preference = get_user_preferences(current_user.id)
+    goal_role = goal_preference.target_role if goal_preference else ""
+    goal_prompt_needed = not goal_role
 
-    return render_template("recommendations.html", courses=recommended)
+    base_query = Course.query
+    if completed_ids:
+        base_query = base_query.filter(~Course.id.in_(completed_ids))
+
+    recommended_query = base_query
+    if goal_role:
+        keywords = extract_goal_keywords(goal_role)
+        recommended_query = apply_keyword_filter(recommended_query, keywords, Course.title, Course.description)
+
+    recommended = recommended_query.order_by(Course.title.asc()).limit(8).all()
+    if goal_role and not recommended:
+        recommended = base_query.order_by(Course.title.asc()).limit(8).all()
+
+    return render_template(
+        "recommendations.html",
+        courses=recommended,
+        goal_preference=goal_preference,
+        goal_prompt_needed=goal_prompt_needed,
+    )
 
 
 @app.route("/mock-test", methods=["GET", "POST"])
@@ -2146,6 +2728,9 @@ def mock_test():
     available_subjects = ["All Subjects"] + [c.name for c in CourseCategory.query.order_by(CourseCategory.name.asc()).all()]
     questions = []
     payload_token = ""
+    timer_seconds = 0
+    selected_answers = {}
+    review_mode = False
 
     if current_user.is_authenticated:
         latest_attempt = (
@@ -2174,6 +2759,7 @@ def mock_test():
         }
         payload_token = make_mock_test_payload_token(payload)
         total_questions = len(questions)
+        timer_seconds = total_questions * SECONDS_PER_MOCK_QUESTION
         flash(
             "AI interviewer prepared your test."
             if ai_generated
@@ -2194,6 +2780,8 @@ def mock_test():
         payload_count = parse_int(saved_payload.get("question_count"), selected_question_count)
         if payload_count in question_count_options:
             selected_question_count = payload_count
+        if questions:
+            timer_seconds = len(questions) * SECONDS_PER_MOCK_QUESTION
 
     if request.method == "POST":
         action = request.form.get("action", "").strip().lower()
@@ -2210,6 +2798,7 @@ def mock_test():
                     selected_index = int(selected)
                 except (TypeError, ValueError):
                     selected_index = -1
+                selected_answers[item["id"]] = selected_index
                 if selected_index == item["answer_index"]:
                     correct_count += 1
                 else:
@@ -2240,6 +2829,7 @@ def mock_test():
                     flash("Test submitted, but saving history failed.", "warning")
             flash("Mock test submitted successfully.", "success")
             payload_token = ""
+            review_mode = True
         else:
             total_questions = len(questions)
 
@@ -2259,16 +2849,25 @@ def mock_test():
         passed=passed,
         is_guest_mode=is_guest_mode,
         interviewer_feedback=interviewer_feedback,
+        timer_seconds=timer_seconds,
+        selected_answers=selected_answers,
+        review_mode=review_mode,
     )
 
 
 @app.route("/interview-questions")
 def interview_questions():
+    selected_tag = request.args.get("tag", "").strip()
     interview_pdfs = get_interview_pdf_library()
+    available_tags = sorted({tag for item in interview_pdfs for tag in (item.get("tags") or [])})
+    if selected_tag and selected_tag in available_tags:
+        interview_pdfs = [item for item in interview_pdfs if selected_tag in (item.get("tags") or [])]
     return render_template(
         "interview_questions.html",
         question_groups=INTERVIEW_QUESTION_GROUPS,
         interview_pdfs=interview_pdfs,
+        available_tags=available_tags,
+        selected_tag=selected_tag,
     )
 
 
@@ -2300,8 +2899,17 @@ def interview_question_legacy_file(legacy_name):
 
 @app.route("/notes")
 def notes():
+    selected_tag = request.args.get("tag", "").strip()
     notes_library = get_notes_library()
-    return render_template("notes.html", notes_library=notes_library)
+    available_tags = sorted({tag for item in notes_library for tag in (item.get("tags") or [])})
+    if selected_tag and selected_tag in available_tags:
+        notes_library = [item for item in notes_library if selected_tag in (item.get("tags") or [])]
+    return render_template(
+        "notes.html",
+        notes_library=notes_library,
+        available_tags=available_tags,
+        selected_tag=selected_tag,
+    )
 
 
 @app.route("/resume-builder", methods=["GET", "POST"])
@@ -2344,6 +2952,27 @@ def resume_builder():
     )
 
 
+@app.route("/resume-builder/pdf", methods=["POST"])
+def resume_builder_pdf():
+    raw_text = request.form.get("ats_text", "")
+    text_value = (raw_text or "").strip()
+    if not text_value:
+        resume_form = {}
+        for key, max_length in RESUME_FIELD_LIMITS.items():
+            resume_form[key] = sanitize_text(request.form.get(key, ""), max_length)
+        text_value = build_ats_resume_text(resume_form)
+    if len(text_value) > 10000:
+        text_value = text_value[:10000]
+    lines = [line.strip() for line in text_value.splitlines()]
+    pdf_bytes = build_simple_pdf("ATS Resume", lines)
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name="ats-resume.pdf",
+    )
+
+
 @app.route("/ai-assistant", methods=["GET", "POST"])
 def ai_assistant():
     """
@@ -2355,6 +2984,7 @@ def ai_assistant():
     project_topic = ""
     project_level = "Beginner"
     project_count = 5
+    history = session.get("ai_history", [])
 
     if request.method == "POST":
         action = request.form.get("action", "ask").strip().lower()
@@ -2383,6 +3013,19 @@ def ai_assistant():
                     answer = "AI assistant is temporarily unavailable. Please try again."
                     flash("Unable to fetch AI response right now.", "danger")
 
+        if question and answer:
+            history = history if isinstance(history, list) else []
+            history.insert(
+                0,
+                {
+                    "question": question,
+                    "answer": answer,
+                    "created_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
+                },
+            )
+            history = history[:AI_HISTORY_MAX_ENTRIES]
+            session["ai_history"] = history
+
     return render_template(
         "ai_assistant.html",
         question=question,
@@ -2391,7 +3034,19 @@ def ai_assistant():
         project_level=project_level,
         project_count=project_count,
         project_level_options=PROJECT_IDEA_LEVEL_OPTIONS,
+        history=history,
     )
+
+
+@app.route("/resources/open/<int:resource_id>")
+def open_learning_resource(resource_id):
+    resource = LearningResource.query.get_or_404(resource_id)
+    record_resource_open(resource.id)
+    if resource.file_path:
+        return redirect(url_for("static", filename=resource.file_path))
+    if resource.external_url and is_valid_http_url(resource.external_url):
+        return redirect(resource.external_url)
+    abort(404)
 
 
 @app.route("/uploads/<path:filename>")

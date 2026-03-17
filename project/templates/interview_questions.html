@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mb-5">
+    <h1 class="h2 mb-2">Interview Questions</h1>
+    <p class="text-muted">Prepare for technical interviews with curated questions from industry leaders.</p>
+</div>
+
+<!-- OOP Interview Questions Section -->
+<div class="mb-5">
+    <h2 class="h3 mb-4">OOP Interview Questions</h2>
+
+    {% for group in question_groups %}
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-body-tertiary border-0">
+            <h3 class="h5 mb-0">
+                <i class="bi bi-bookmark-fill text-primary"></i> {{ group.level }} Level
+            </h3>
+        </div>
+        <div class="card-body">
+            <div class="accordion" id="accordion{{ group.level }}">
+                {% for item in group.questions %}
+                <div class="accordion-item border-0 mb-2">
+                    <h4 class="accordion-header">
+                        <button class="accordion-button collapsed text-body bg-body-tertiary" type="button" data-bs-toggle="collapse" data-bs-target="#collapse{{ group.level }}{{ loop.index0 }}" aria-expanded="false">
+                            <span class="badge bg-secondary me-2">{{ loop.index }}</span> {{ item.question }}
+                        </button>
+                    </h4>
+                    <div id="collapse{{ group.level }}{{ loop.index0 }}" class="accordion-collapse collapse" data-bs-parent="#accordion{{ group.level }}">
+                        <div class="accordion-body bg-body-tertiary text-body">
+                            <p class="mb-0">{{ item.answer }}</p>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Company-wise PDF Library -->
+<div class="mb-5">
+    <h2 class="h3 mb-4">Company-Wise Interview Question PDFs</h2>
+    {% if available_tags %}
+    <div class="d-flex flex-wrap gap-2 mb-3">
+        <a class="btn btn-sm {% if not selected_tag %}btn-primary{% else %}btn-outline-primary{% endif %}" href="{{ url_for('interview_questions') }}">All</a>
+        {% for tag in available_tags %}
+        <a class="btn btn-sm {% if tag == selected_tag %}btn-primary{% else %}btn-outline-primary{% endif %}" href="{{ url_for('interview_questions', tag=tag) }}">{{ tag }}</a>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% if interview_pdfs %}
+    <div class="row g-3">
+        {% for item in interview_pdfs %}
+        <div class="col-md-6 col-lg-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">{{ item.title }}</h5>
+                    <p class="card-text text-muted small mb-2">{{ item.preview | truncate(160, True, '...') }}</p>
+                    <div class="d-flex flex-wrap gap-2 mb-3">
+                        {% for tag in item.tags %}
+                        <span class="tag-chip">{{ tag }}</span>
+                        {% endfor %}
+                    </div>
+                    <p class="card-text text-muted small mb-3">PDF{% if item.size_mb %} | {{ item.size_mb }} MB{% endif %}</p>
+                    <a class="btn btn-outline-primary btn-sm mt-auto" href="{{ url_for('interview_question_legacy_file', legacy_name=item.file_name) }}" target="_blank" rel="noopener noreferrer">Open PDF</a>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="alert alert-secondary mb-0" role="alert">No interview question PDFs available yet.</div>
+    {% endif %}
+</div>
+
+<!-- Additional Resources Section -->
+<div class="card border-0 shadow-sm bg-body-tertiary">
+    <div class="card-body">
+        <h4 class="card-title mb-3">Interview Tips</h4>
+        <ul class="list-unstyled">
+            <li class="mb-2"><strong>1. Understand the Fundamentals:</strong> Solid understanding of OOP concepts is crucial for most tech interviews.</li>
+            <li class="mb-2"><strong>2. Practice Coding:</strong> Be ready to code solutions on a whiteboard or online IDE.</li>
+            <li class="mb-2"><strong>3. Think Out Loud:</strong> Explain your thought process as you work through problems.</li>
+            <li class="mb-2"><strong>4. Ask Clarifying Questions:</strong> Do not assume. Ask the interviewer for clarification.</li>
+            <li class="mb-2"><strong>5. Optimize Solutions:</strong> Start with a working solution, then optimize for time and space complexity.</li>
+        </ul>
+    </div>
+</div>
+
+{% endblock %}
