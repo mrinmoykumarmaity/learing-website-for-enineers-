@@ -48,6 +48,18 @@ def test_dashboard_page_loads(client):
     assert b"Learning Categories" in response.data
 
 
+def test_roadmap_page_links_to_static_pdfs(client):
+    response = client.get("/roadmap")
+    assert response.status_code == 200
+    assert b"/roadmaps/full-stack-web-development-roadmap.pdf" in response.data
+
+
+def test_roadmap_static_pdf_is_served(client):
+    response = client.get("/roadmaps/full-stack-web-development-roadmap.pdf")
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("application/pdf")
+
+
 def test_admin_route_requires_unlock(client):
     response = client.get("/admin/courses")
     assert response.status_code == 302

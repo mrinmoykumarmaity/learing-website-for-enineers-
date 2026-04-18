@@ -1031,6 +1031,21 @@ def build_preview_snippet(title, preview_text=None):
     return f"Quick reference notes for {title}."
 
 
+def get_roadmap_pdf_path(filename):
+    safe_name = (filename or "").strip()
+    if not safe_name:
+        return None
+
+    candidates = [
+        os.path.join(os.path.dirname(app.root_path), "public", "roadmaps", safe_name),
+        os.path.join(app.static_folder, "roadmaps", safe_name),
+    ]
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
 def get_interview_pdf_library():
     static_subdir = "interview_questions"
     library_dir = os.path.join(app.static_folder, static_subdir)
@@ -2653,6 +2668,19 @@ def roadmap_pdf_latest():
     )
 
 
+@app.route("/roadmaps/<path:filename>")
+def roadmap_static_pdf(filename):
+    safe_name = (filename or "").strip()
+    if not safe_name.lower().endswith(".pdf"):
+        abort(404)
+
+    file_path = get_roadmap_pdf_path(safe_name)
+    if file_path is None:
+        abort(404)
+
+    return send_from_directory(os.path.dirname(file_path), os.path.basename(file_path), as_attachment=False)
+
+
 @app.route("/roadmap/pdf/<int:roadmap_id>")
 @login_required
 def roadmap_pdf(roadmap_id):
@@ -3043,6 +3071,8 @@ def open_learning_resource(resource_id):
     resource = LearningResource.query.get_or_404(resource_id)
     record_resource_open(resource.id)
     if resource.file_path:
+        if resource.file_path.startswith("roadmaps/"):
+            return redirect(url_for("roadmap_static_pdf", filename=os.path.basename(resource.file_path)))
         return redirect(url_for("static", filename=resource.file_path))
     if resource.external_url and is_valid_http_url(resource.external_url):
         return redirect(resource.external_url)
